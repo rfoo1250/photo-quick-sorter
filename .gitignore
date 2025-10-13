@@ -1,0 +1,10 @@
+# CMake build folders
+build/
+CMakeFiles/
+CMakeCache.txt
+*.vcxproj
+*.sln
+
+
+# Misch.
+tree.txt
