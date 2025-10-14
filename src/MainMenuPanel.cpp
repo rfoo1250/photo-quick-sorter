@@ -90,6 +90,8 @@ void MainMenuPanel::OnBrowseFolder(wxCommandEvent& event) {
             m_folder2Text->SetValue(path);
             frame->folderLocations.folder2 = path;
         }
+        wxLogMessage("Base folder: %s", frame->folderLocations.baseFolder);
+
     }
 }
 

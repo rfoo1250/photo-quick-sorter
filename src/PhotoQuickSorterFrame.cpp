@@ -6,7 +6,6 @@ PhotoQuickSorterFrame::PhotoQuickSorterFrame(const wxString& title)
     : wxFrame(nullptr, wxID_ANY, title, wxDefaultPosition, wxSize(500, 500))
 {
     folderLocations.Clear(); // optional safety
-    
     m_mainMenuPanel = new MainMenuPanel(this);
     m_sortPhotosPanel = new SortPhotosPanel(this);
 
