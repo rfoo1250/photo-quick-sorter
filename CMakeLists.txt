@@ -1,16 +1,43 @@
 cmake_minimum_required(VERSION 3.16)
 project(PhotoQuickSorter VERSION 0.1.0 LANGUAGES CXX)
 
+# Use C++17
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# wxWidgets setup
 set(wxWidgets_ROOT_DIR "C:/Libraries/wxWidgets-3.3.1")
 set(wxWidgets_LIB_DIR "C:/Libraries/wxWidgets-3.3.1/lib/vc_x64_lib")
-
 set(wxWidgets_USE_STATIC ON)
 
 find_package(wxWidgets REQUIRED COMPONENTS core base)
 include(${wxWidgets_USE_FILE})
 
-add_executable(PhotoQuickSorter WIN32 src/photo-quick-sorter.cpp)
-target_link_libraries(PhotoQuickSorter ${wxWidgets_LIBRARIES})
+# Source files — all inside src/
+set(SOURCES
+    src/PhotoQuickSorterApp.cpp
+    src/PhotoQuickSorterFrame.cpp
+    src/MainMenuPanel.cpp
+    src/SortPhotosPanel.cpp
+    FolderLocations.cpp
+)
+# Header files  — all inside src/
+set(HEADERS
+    src/PhotoQuickSorterApp.h
+    src/PhotoQuickSorterFrame.h
+    src/MainMenuPanel.h
+    src/SortPhotosPanel.h
+    FolderLocations.h
+)
+
+# Create the executable (Windows GUI app)
+add_executable(photo-quick-sorter WIN32 ${SOURCES} ${HEADERS})
+
+# Link against wxWidgets
+target_link_libraries(photo-quick-sorter PRIVATE ${wxWidgets_LIBRARIES})
+
+# Optional: organize IDE project structure (Visual Studio, CLion)
+# source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX "Source Files" FILES ${SOURCES} ${HEADERS})
+
+# Optional: add include directories for headers
+target_include_directories(photo-quick-sorter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
