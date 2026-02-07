@@ -30,10 +30,16 @@ set(HEADERS
     src/FolderLocations.h
 )
 
-source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX "Source Files" FILES ${SOURCES} ${HEADERS})
-
 # Create the executable (Windows GUI app)
 add_executable(PhotoQuickSorter WIN32 ${SOURCES} ${HEADERS})
+
+# add more stuff here on
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX "Source Files" FILES ${SOURCES} ${HEADERS})
+
+target_compile_definitions(PhotoQuickSorter PRIVATE
+    $<$<CONFIG:Debug>:DEBUG_MODE=1>
+    $<$<NOT:$<CONFIG:Debug>>:DEBUG_MODE=0>
+)
 
 # Link against wxWidgets
 target_link_libraries(PhotoQuickSorter PRIVATE ${wxWidgets_LIBRARIES})
