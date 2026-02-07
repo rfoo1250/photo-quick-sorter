@@ -30,14 +30,16 @@ set(HEADERS
     FolderLocations.h
 )
 
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX "Source Files" FILES ${SOURCES} ${HEADERS})
+
 # Create the executable (Windows GUI app)
-add_executable(photo-quick-sorter WIN32 ${SOURCES} ${HEADERS})
+add_executable(PhotoQuickSorter WIN32 ${SOURCES} ${HEADERS})
 
 # Link against wxWidgets
-target_link_libraries(photo-quick-sorter PRIVATE ${wxWidgets_LIBRARIES})
+target_link_libraries(PhotoQuickSorter PRIVATE ${wxWidgets_LIBRARIES})
 
 # Optional: organize IDE project structure (Visual Studio, CLion)
 # source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX "Source Files" FILES ${SOURCES} ${HEADERS})
 
 # Optional: add include directories for headers
-target_include_directories(photo-quick-sorter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(PhotoQuickSorter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

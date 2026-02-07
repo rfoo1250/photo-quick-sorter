@@ -1,3 +1,5 @@
+#error THIS_FILE_IS_NOT_USED
+
 #include <wx/wx.h>
 #include <wx/filename.h>
 #include <wx/stdpaths.h>
