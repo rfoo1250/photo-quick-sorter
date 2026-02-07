@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../FolderLocations.h"
+#include "FolderLocations.h"
 #include <wx/wx.h>
 
 class MainMenuPanel;

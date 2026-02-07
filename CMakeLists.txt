@@ -19,7 +19,7 @@ set(SOURCES
     src/PhotoQuickSorterFrame.cpp
     src/MainMenuPanel.cpp
     src/SortPhotosPanel.cpp
-    FolderLocations.cpp
+    src/FolderLocations.cpp
 )
 # Header files  — all inside src/
 set(HEADERS
@@ -27,7 +27,7 @@ set(HEADERS
     src/PhotoQuickSorterFrame.h
     src/MainMenuPanel.h
     src/SortPhotosPanel.h
-    FolderLocations.h
+    src/FolderLocations.h
 )
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX "Source Files" FILES ${SOURCES} ${HEADERS})

@@ -1,6 +1,6 @@
 #include "MainMenuPanel.h"
 #include "PhotoQuickSorterFrame.h"
-#include "../FolderLocations.h"
+#include "FolderLocations.h"
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
 
