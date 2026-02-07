@@ -8,11 +8,11 @@ PhotoQuickSorterFrame::PhotoQuickSorterFrame(const wxString& title)
     folderLocations.Clear(); // optional safety
     m_mainMenuPanel = new MainMenuPanel(this);
     m_sortPhotosPanel = new SortPhotosPanel(this);
-
+    
     wxBoxSizer* frameSizer = new wxBoxSizer(wxVERTICAL);
     frameSizer->Add(m_mainMenuPanel, 1, wxEXPAND);
     frameSizer->Add(m_sortPhotosPanel, 1, wxEXPAND);
-
+    
     SetSizer(frameSizer);
     m_sortPhotosPanel->Hide();
     Layout();
@@ -26,6 +26,7 @@ void PhotoQuickSorterFrame::ShowMainMenuPanel() {
 
 void PhotoQuickSorterFrame::ShowSortPhotosPanel() {
     m_mainMenuPanel->Hide();
+    m_sortPhotosPanel->RefreshData();
     m_sortPhotosPanel->Show();
     Layout();
 }
