@@ -3,11 +3,18 @@
 #include "config.h"
 #include <wx/log.h>
 
-// Use wxLogMessage in debug; compile away in non-debug.
+// Format: [LEVEL] message...
+// Note: macros forward printf-style args directly to wxLog* functions.
+
 #if DEBUG_MODE
-    // Forward any args to wxLogMessage; wxWidgets accepts printf-like args or wxString
-    #define LOG_DEBUG(...) wxLogMessage(__VA_ARGS__)
+    // Debug messages appear only in debug builds
+    #define LOG_DEBUG(...) wxLogMessage("[DEBUG] " __VA_ARGS__)
 #else
-    // No-op that compiles away
+    // compile-away in release builds
     #define LOG_DEBUG(...) ((void)0)
 #endif
+
+// Always-available logs (these will still be captured by the LogWindow when attached)
+#define LOG_INFO(...)  wxLogMessage("[INFO] " __VA_ARGS__)
+#define LOG_WARN(...)  wxLogWarning("[WARN] " __VA_ARGS__)
+#define LOG_ERROR(...) wxLogError("[ERROR] " __VA_ARGS__)
