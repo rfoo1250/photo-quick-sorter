@@ -1,10 +1,9 @@
 #include "LogWindow.h"
-#include <wx/log.h>
-#include <wx/logtext.h>
 #include <wx/filedlg.h>
 #include <wx/stdpaths.h>
 #include <wx/filefn.h>
 #include <wx/textfile.h>
+#include <wx/sizer.h>
 
 enum {
     ID_LOG_CLEAR = wxID_HIGHEST + 1,
@@ -17,7 +16,10 @@ wxBEGIN_EVENT_TABLE(LogWindow, wxFrame)
 wxEND_EVENT_TABLE()
 
 LogWindow::LogWindow(wxWindow* parent, wxWindowID id, const wxString& title)
-    : wxFrame(parent, id, title, wxDefaultPosition, wxSize(700, 300), wxDEFAULT_FRAME_STYLE | wxFRAME_NO_TASKBAR)
+    : wxFrame(parent, id, title, wxDefaultPosition, wxSize(700, 300), wxDEFAULT_FRAME_STYLE | wxFRAME_NO_TASKBAR),
+      m_textCtrl(nullptr),
+      m_prevLogTarget(nullptr),
+      m_ownedLogTarget(nullptr)
 {
     // Create controls: a toolbar-like horizontal sizer with Clear / Save, and the log text area below
     wxBoxSizer* topSizer = new wxBoxSizer(wxVERTICAL);
@@ -39,6 +41,7 @@ LogWindow::LogWindow(wxWindow* parent, wxWindowID id, const wxString& title)
     topSizer->Add(m_textCtrl, 1, wxEXPAND | wxALL, 4);
 
     SetSizer(topSizer);
+    Layout();
     CentreOnParent();
 }
 
@@ -52,25 +55,32 @@ bool LogWindow::AttachAsGlobalLogTarget()
 {
     if (!m_textCtrl) return false;
 
+    // If already attached, do nothing
+    if (m_ownedLogTarget != nullptr) return true;
+
     // create a wxLogTextCtrl that writes into our text control
+    // In modern wxWidgets wxLogTextCtrl is provided by <wx/log.h>
     wxLog* newTarget = new wxLogTextCtrl(m_textCtrl);
+
     // SetActiveTarget returns the previous target; store it to restore later
     m_prevLogTarget = wxLog::SetActiveTarget(newTarget);
+
+    // Remember the pointer we allocated so we can delete it later.
+    m_ownedLogTarget = newTarget;
     return true;
 }
 
 void LogWindow::DetachGlobalLogTarget()
 {
-    // If we attached previously, restore the old target and delete current
-    // Get the current active target, restore previous, and delete the current (our wxLogTextCtrl)
-    // Note: wxLog::SetActiveTarget returns previous target
-    if (wxLog::GetActiveTarget()) {
-        // set previous back (even if null), capture current
-        wxLog* current = wxLog::SetActiveTarget(m_prevLogTarget);
-        // delete current if it was a wxLogTextCtrl we allocated
-        if (current != nullptr) {
-            delete current;
-        }
+    // Only detach if we previously attached and still own the target
+    if (m_ownedLogTarget != nullptr)
+    {
+        // Restore previous target (may be nullptr) and avoid deleting a target we don't own
+        wxLog::SetActiveTarget(m_prevLogTarget);
+
+        // delete the wxLogTextCtrl we created
+        delete m_ownedLogTarget;
+        m_ownedLogTarget = nullptr;
         m_prevLogTarget = nullptr;
     }
 }
@@ -108,7 +118,6 @@ void LogWindow::OnClear(wxCommandEvent& WXUNUSED(evt))
     Clear();
 }
 
-// dont needa save ngl
 void LogWindow::OnSave(wxCommandEvent& WXUNUSED(evt))
 {
     wxString defaultPath = wxStandardPaths::Get().GetDocumentsDir() + wxFILE_SEP_PATH + "app_log.txt";
@@ -116,6 +125,8 @@ void LogWindow::OnSave(wxCommandEvent& WXUNUSED(evt))
                      "Text files (*.txt)|*.txt|All files (*.*)|*.*",
                      wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
     if (dlg.ShowModal() == wxID_OK) {
-        SaveToFile(dlg.GetPath());
+        if (!SaveToFile(dlg.GetPath())) {
+            wxLogWarning("Failed to save log file: %s", dlg.GetPath());
+        }
     }
 }
