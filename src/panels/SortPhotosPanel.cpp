@@ -1,5 +1,5 @@
-#include "SortPhotosPanel.h"
-#include "PhotoQuickSorterFrame.h"
+#include "panels/SortPhotosPanel.h"
+#include "ui/PhotoQuickSorterFrame.h"
 
 SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
     : wxPanel(parent)

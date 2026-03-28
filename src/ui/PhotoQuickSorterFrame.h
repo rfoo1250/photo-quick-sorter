@@ -3,11 +3,11 @@
 #include <memory>
 #include <wx/wx.h>
 
-#include "FolderLocations.h"
-// #include "ImageRepository.h"
-#include "logging.h"
+#include "core/FolderLocations.h"
+// #include "core/ImageRepository.h"
+#include "utils/logging.h"
 #if DEBUG_MODE
-#  include "LogWindow.h"
+#  include "ui/LogWindow.h"
 #endif
 
 // encompasses the main frame of the application, which contains the main menu and the sorting panel

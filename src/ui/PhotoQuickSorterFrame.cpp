@@ -1,11 +1,11 @@
-#include "PhotoQuickSorterFrame.h"
-#include "MainMenuPanel.h"
-#include "SortPhotosPanel.h"
-#include "logging.h"
+#include "ui/PhotoQuickSorterFrame.h"
+#include "panels/MainMenuPanel.h"
+#include "panels/SortPhotosPanel.h"
+#include "utils/logging.h"
 #include <memory>
 
 #if DEBUG_MODE
-#include "LogWindow.h"
+#include "ui/LogWindow.h"
 #endif
 
 PhotoQuickSorterFrame::PhotoQuickSorterFrame(const wxString &title)

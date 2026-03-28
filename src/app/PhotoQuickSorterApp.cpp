@@ -1,5 +1,5 @@
-#include "PhotoQuickSorterApp.h"
-#include "PhotoQuickSorterFrame.h"
+#include "app/PhotoQuickSorterApp.h"
+#include "ui/PhotoQuickSorterFrame.h"
 
 wxIMPLEMENT_APP(PhotoQuickSorterApp);
 

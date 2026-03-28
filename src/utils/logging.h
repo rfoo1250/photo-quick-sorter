@@ -1,6 +1,6 @@
 #pragma once
 
-#include "config.h"
+#include "utils/config.h"
 #include <wx/log.h>
 
 // Format: [LEVEL] message...

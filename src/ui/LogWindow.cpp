@@ -1,4 +1,4 @@
-#include "LogWindow.h"
+#include "ui/LogWindow.h"
 #include <wx/filedlg.h>
 #include <wx/stdpaths.h>
 #include <wx/filefn.h>

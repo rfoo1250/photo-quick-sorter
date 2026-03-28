@@ -1,7 +1,7 @@
-#include "logging.h"
-#include "MainMenuPanel.h"
-#include "PhotoQuickSorterFrame.h"
-#include "FolderLocations.h"
+#include "utils/logging.h"
+#include "panels/MainMenuPanel.h"
+#include "ui/PhotoQuickSorterFrame.h"
+#include "core/FolderLocations.h"
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
 #include <wx/dir.h>
