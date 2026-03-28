@@ -21,24 +21,24 @@ endif()
 
 # ---- Source / headers ----
 set(SOURCES
-    src/PhotoQuickSorterApp.cpp
-    src/PhotoQuickSorterFrame.cpp
-    src/LogWindow.cpp
-    src/FolderLocations.cpp
-    # src/ImageRepository.cpp
-    src/MainMenuPanel.cpp
-    src/SortPhotosPanel.cpp
+    src/app/PhotoQuickSorterApp.cpp
+    src/ui/PhotoQuickSorterFrame.cpp
+    src/ui/LogWindow.cpp
+    src/core/FolderLocations.cpp
+    # src/core/ImageRepository.cpp
+    src/panels/MainMenuPanel.cpp
+    src/panels/SortPhotosPanel.cpp
 )
 set(HEADERS
-    src/config.h
-    src/PhotoQuickSorterApp.h
-    src/PhotoQuickSorterFrame.h
-    src/logging.h
-    src/LogWindow.h
-    src/FolderLocations.h
-    # src/ImageRepository.h
-    src/MainMenuPanel.h
-    src/SortPhotosPanel.h
+    src/utils/config.h
+    src/app/PhotoQuickSorterApp.h
+    src/ui/PhotoQuickSorterFrame.h
+    src/utils/logging.h
+    src/ui/LogWindow.h
+    src/core/FolderLocations.h
+    # src/core/ImageRepository.h
+    src/panels/MainMenuPanel.h
+    src/panels/SortPhotosPanel.h
 )
 
 add_executable(PhotoQuickSorter WIN32 ${SOURCES} ${HEADERS})
