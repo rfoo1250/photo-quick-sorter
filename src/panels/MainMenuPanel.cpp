@@ -7,6 +7,61 @@
 #include <wx/dir.h>
 #include <wx/filefn.h>
 
+namespace {
+
+wxBitmap LoadMenuKeycap(const wxString& filename) {
+    wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
+    exe.Normalize(); exe.SetFullName(""); exe.RemoveLastDir(); exe.RemoveLastDir();
+    wxString path = exe.GetFullPath() + "assets/single-keys-blank/200dpi/" + filename;
+    if (!wxFileExists(path)) return wxNullBitmap;
+    wxImage img(path, wxBITMAP_TYPE_PNG);
+    if (!img.IsOk()) return wxNullBitmap;
+    img = img.Scale(24, 24, wxIMAGE_QUALITY_HIGH);
+    return wxBitmap(img);
+}
+
+// yesNo=true → Yes(default)/No buttons; false → OK(default) only
+// Returns true if user clicked Yes/OK
+bool ShowIconDialog(wxWindow* parent, const wxString& title, const wxString& msg, bool yesNo = false) {
+    wxDialog dlg(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE);
+
+    wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
+
+    wxStaticText* text = new wxStaticText(&dlg, wxID_ANY, msg,
+                                          wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+    text->Wrap(360);
+    vSizer->Add(text, 0, wxALIGN_CENTER | wxALL, 20);
+
+    wxBoxSizer* btnRow = new wxBoxSizer(wxHORIZONTAL);
+    wxBitmap icEnter = LoadMenuKeycap("enter.png");
+
+    if (yesNo) {
+        // wxDialog only auto-closes for wxID_OK (affirmative) and wxID_CANCEL (escape)
+        wxButton* yesBtn = new wxButton(&dlg, wxID_OK,     "Yes");
+        wxButton* noBtn  = new wxButton(&dlg, wxID_CANCEL, "No");
+        yesBtn->SetMinSize(wxSize(120, 45));
+        noBtn->SetMinSize(wxSize(120, 45));
+        if (icEnter.IsOk()) { yesBtn->SetBitmap(icEnter); yesBtn->SetBitmapPosition(wxLEFT); }
+        yesBtn->SetDefault();
+        btnRow->Add(yesBtn, 0, wxALL, 8);
+        btnRow->Add(noBtn,  0, wxALL, 8);
+    } else {
+        wxButton* okBtn = new wxButton(&dlg, wxID_OK, "OK");
+        okBtn->SetMinSize(wxSize(120, 45));
+        if (icEnter.IsOk()) { okBtn->SetBitmap(icEnter); okBtn->SetBitmapPosition(wxLEFT); }
+        okBtn->SetDefault();
+        btnRow->Add(okBtn, 0, wxALL, 8);
+    }
+
+    vSizer->Add(btnRow, 0, wxALIGN_CENTER | wxBOTTOM, 10);
+    dlg.SetSizerAndFit(vSizer);
+    dlg.Centre();
+
+    return dlg.ShowModal() == wxID_OK;
+}
+
+} // namespace
+
 MainMenuPanel::MainMenuPanel(wxWindow *parent)
     : wxPanel(parent)
 {
@@ -82,12 +137,23 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
 
 void MainMenuPanel::OnBrowseFolder(wxCommandEvent &event)
 {
-    wxDirDialog dlg(this, "Select a folder", "", wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+    int id = event.GetId();
+
+    // For folder 1 & 2, start at the parent of the base folder if one is set
+    wxString startDir;
+    if (id == ID_BROWSE_1 || id == ID_BROWSE_2) {
+        wxString base = m_baseFolderText->GetValue().Trim(true).Trim(false);
+        if (!base.IsEmpty()) {
+            wxFileName fn(base);
+            fn.Normalize();
+            startDir = fn.GetPath(); // parent directory
+        }
+    }
+
+    wxDirDialog dlg(this, "Select a folder", startDir, wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
     if (dlg.ShowModal() == wxID_OK)
     {
         wxString path = dlg.GetPath();
-        int id = event.GetId();
-
         auto *frame = dynamic_cast<PhotoQuickSorterFrame *>(GetParent());
         if (!frame)
             return;
@@ -152,6 +218,34 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
             wxOK | wxICON_ERROR,
             this);
         return;
+    }
+
+    // 3a) Conflict check: folder1 and folder2 must not be the same location
+    const wxString& f1 = frame->folderLocations.folder1;
+    const wxString& f2 = frame->folderLocations.folder2;
+    if (!f1.IsEmpty() && !f2.IsEmpty() && f1 == f2) {
+        ShowIconDialog(this,
+            "Conflicting Folders",
+            "Folder 1 and Folder 2 cannot be the same location.\nPlease choose different paths.");
+        return;
+    }
+
+    // 3b) Empty destination warning: ask before proceeding
+    if (f1.IsEmpty() || f2.IsEmpty()) {
+        wxString which;
+        if (f1.IsEmpty() && f2.IsEmpty())
+            which = "Folder 1 and Folder 2 are both";
+        else if (f1.IsEmpty())
+            which = "Folder 1 is";
+        else
+            which = "Folder 2 is";
+        bool proceed = ShowIconDialog(this,
+            "Empty Folder Path",
+            wxString::Format(
+                "%s not set.\n\nImages sorted to that destination will stay in the base folder.\n\nContinue anyway?",
+                which),
+            true);
+        if (!proceed) return;
     }
 
     // 3) Folder1 / Folder2: auto-create if path provided but missing
