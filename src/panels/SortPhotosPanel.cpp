@@ -34,6 +34,13 @@ wxBitmap SortPhotosPanel::LoadKeycap(const wxString& filename, int size) const
 SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
     : wxPanel(parent)
 {
+    BuildSortingUI();
+    Bind(wxEVT_SIZE, &SortPhotosPanel::OnSize, this);
+    wxGetTopLevelParent(this)->Bind(wxEVT_CHAR_HOOK, &SortPhotosPanel::OnKeyDown, this);
+}
+
+void SortPhotosPanel::BuildSortingUI()
+{
     m_statusLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
     m_imageBitmap = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
 
@@ -49,51 +56,44 @@ SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
     wxBitmap icDown  = LoadKeycap("cursor-down.png");
     wxBitmap icZ     = LoadKeycap("z.png");
 
-    if (icLeft.IsOk())  { m_folder1Btn->SetBitmap(icLeft);  m_folder1Btn->SetBitmapPosition(wxLEFT);   }
-    if (icRight.IsOk()) { m_folder2Btn->SetBitmap(icRight); m_folder2Btn->SetBitmapPosition(wxRIGHT);  }
-    if (icUp.IsOk())    { m_saveBtn->SetBitmap(icUp);       m_saveBtn->SetBitmapPosition(wxTOP);       }
-    if (icDown.IsOk())  { m_deleteBtn->SetBitmap(icDown);   m_deleteBtn->SetBitmapPosition(wxBOTTOM);  }
-    if (icZ.IsOk())     { m_undoBtn->SetBitmap(icZ);        m_undoBtn->SetBitmapPosition(wxLEFT);      }
+    if (icLeft.IsOk())  { m_folder1Btn->SetBitmap(icLeft);  m_folder1Btn->SetBitmapPosition(wxLEFT);  }
+    if (icRight.IsOk()) { m_folder2Btn->SetBitmap(icRight); m_folder2Btn->SetBitmapPosition(wxRIGHT); }
+    if (icUp.IsOk())    { m_saveBtn->SetBitmap(icUp);       m_saveBtn->SetBitmapPosition(wxTOP);      }
+    if (icDown.IsOk())  { m_deleteBtn->SetBitmap(icDown);   m_deleteBtn->SetBitmapPosition(wxBOTTOM); }
+    if (icZ.IsOk())     { m_undoBtn->SetBitmap(icZ);        m_undoBtn->SetBitmapPosition(wxLEFT);     }
 
-    // Larger buttons
     m_folder1Btn->SetMinSize(wxSize(130, 55));
     m_folder2Btn->SetMinSize(wxSize(130, 55));
     m_saveBtn->SetMinSize(wxSize(130, 55));
     m_deleteBtn->SetMinSize(wxSize(130, 55));
     m_undoBtn->SetMinSize(wxSize(100, 40));
 
-    // Compass-rose layout: Save top, Delete bottom, Folder1 left, Folder2 right, image center
     wxFlexGridSizer* grid = new wxFlexGridSizer(3, 3, 0, 0);
-    grid->AddGrowableRow(1);  // image row expands vertically
-    grid->AddGrowableCol(1);  // image column expands horizontally
+    grid->AddGrowableRow(1);
+    grid->AddGrowableCol(1);
 
-    // Row 0 — top
     grid->Add(m_undoBtn,    0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(m_saveBtn,    0, wxALL | wxALIGN_CENTER, 8);
-    grid->Add(0, 0);  // empty
+    grid->Add(0, 0);
 
-    // Row 1 — middle
     grid->Add(m_folder1Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(m_imageBitmap, 0, wxALIGN_CENTER | wxALL, 10);
     grid->Add(m_folder2Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
 
-    // Row 2 — bottom
-    grid->Add(0, 0);  // empty
+    grid->Add(0, 0);
     grid->Add(m_deleteBtn,  0, wxALL | wxALIGN_CENTER, 8);
-    grid->Add(0, 0);  // empty
+    grid->Add(0, 0);
 
     wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
     vSizer->Add(m_statusLabel, 0, wxALIGN_CENTER | wxALL, 5);
     vSizer->Add(grid, 1, wxEXPAND | wxALL, 5);
     SetSizer(vSizer);
 
-    m_folder1Btn->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnFolder1, this);
-    m_folder2Btn->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnFolder2, this);
-    m_saveBtn   ->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnSave,    this);
-    m_deleteBtn ->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnDelete,  this);
-    m_undoBtn   ->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnUndo,    this);
-    Bind(wxEVT_SIZE, &SortPhotosPanel::OnSize, this);
-    wxGetTopLevelParent(this)->Bind(wxEVT_CHAR_HOOK, &SortPhotosPanel::OnKeyDown, this);
+    m_folder1Btn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnFolder1, this);
+    m_folder2Btn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnFolder2, this);
+    m_saveBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnSave,    this);
+    m_deleteBtn ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnDelete,  this);
+    m_undoBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnUndo,    this);
 
     SetButtonsEnabled(false);
 }
@@ -117,6 +117,15 @@ void SortPhotosPanel::RefreshData()
               frame->folderLocations.baseFolder,
               frame->folderLocations.folder1,
               frame->folderLocations.folder2);
+
+    // If the sorting UI was destroyed by a previous review/done state, rebuild it
+    if (!m_imageBitmap) {
+        Freeze();
+        DestroyChildren();
+        BuildSortingUI();
+        Layout();
+        Thaw();
+    }
 
     // Reset session state
     m_currentIndex    = 0;
@@ -221,7 +230,7 @@ void SortPhotosPanel::LoadCurrentImage()
         return;
     }
 
-    m_statusLabel->SetLabel(wxString::Format("Image %zu of %zu  —  %s   [%zu recorded]",
+    m_statusLabel->SetLabel(wxString::Format("Image %zu of %zu  -  %s   [%zu recorded]",
         m_currentIndex + 1,
         frame->imageRepo.GetCount(),
         wxFileName(info->path).GetFullName(),
@@ -519,6 +528,7 @@ void SortPhotosPanel::ShowReviewStep()
     SetSizer(vSizer);
     Thaw();
     Layout();
+    confirmBtn->SetFocus();
 }
 
 void SortPhotosPanel::OnStepConfirm(wxCommandEvent& WXUNUSED(evt))
@@ -703,6 +713,7 @@ void SortPhotosPanel::ShowDoneState()
     SetSizer(vSizer);
     Thaw();
     Layout();
+    backBtn->SetFocus();
 }
 
 void SortPhotosPanel::OnSize(wxSizeEvent& evt)

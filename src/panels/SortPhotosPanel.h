@@ -53,6 +53,7 @@ private:
     bool       m_deleteConfirmed   = false;
 
     // --- sorting helpers ---
+    void BuildSortingUI();
     void LoadCurrentImage();
     void SetButtonsEnabled(bool enabled);
     void ShowDoneState();
