@@ -1,6 +1,7 @@
 #pragma once
 #include <wx/wx.h>
 #include <wx/scrolwin.h>
+#include "ui/Toast.h"
 
 enum {
     ID_BROWSE_BASE = wxID_HIGHEST + 1,
@@ -25,4 +26,5 @@ private:
     wxTextCtrl*       m_folder2Text     = nullptr;
     wxScrolledWindow* m_previewScroll   = nullptr;
     wxString          m_previewFolder;
+    Toast*            m_toast           = nullptr;
 };

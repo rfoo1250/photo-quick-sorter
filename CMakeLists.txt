@@ -24,6 +24,7 @@ set(SOURCES
     src/app/PhotoQuickSorterApp.cpp
     src/ui/PhotoQuickSorterFrame.cpp
     src/ui/LogWindow.cpp
+    src/ui/Toast.cpp
     src/core/FolderLocations.cpp
     src/core/ImageRepository.cpp
     src/panels/MainMenuPanel.cpp
@@ -35,6 +36,7 @@ set(HEADERS
     src/ui/PhotoQuickSorterFrame.h
     src/utils/logging.h
     src/ui/LogWindow.h
+    src/ui/Toast.h
     src/core/FolderLocations.h
     src/core/ImageRepository.h
     src/panels/MainMenuPanel.h
