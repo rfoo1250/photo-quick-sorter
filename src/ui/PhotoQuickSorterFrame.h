@@ -4,7 +4,7 @@
 #include <wx/wx.h>
 
 #include "core/FolderLocations.h"
-// #include "core/ImageRepository.h"
+#include "core/ImageRepository.h"
 #include "utils/logging.h"
 #if DEBUG_MODE
 #  include "ui/LogWindow.h"
@@ -21,7 +21,7 @@ public:
     ~PhotoQuickSorterFrame() override;
 
     FolderLocations folderLocations;
-    // ImageRepository imageRepo;
+    ImageRepository imageRepo;
 
     void ShowMainMenuPanel();
     void ShowSortPhotosPanel();

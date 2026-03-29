@@ -127,7 +127,7 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
     const wxString baseFolder = frame->folderLocations.baseFolder;
     LOG_DEBUG("Base folder path: '%s'", baseFolder);
 
-    // 1) Empty path check
+    // 1) Base folder empty check
     if (baseFolder.IsEmpty()) {
         LOG_WARN("OnStartSorting: Base folder path is empty");
         wxMessageBox(
@@ -138,7 +138,7 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
         return;
     }
 
-    // 2) Folder existence check
+    // 2) Base folder existence check
     if (!wxDir::Exists(baseFolder)) {
         LOG_ERROR("OnStartSorting: Base folder does not exist: %s", baseFolder);
         wxMessageBox(
@@ -149,34 +149,51 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
         return;
     }
 
-    // 3) Build image repository
-    // LOG_DEBUG("Building image repository from base folder...");
-    // frame->imageRepo.Clear();
+    // 3) Folder1 / Folder2: auto-create if path provided but missing
+    const wxString folders[2] = { frame->folderLocations.folder1, frame->folderLocations.folder2 };
+    const char*    labels[2]  = { "Folder 1", "Folder 2" };
+    for (int i = 0; i < 2; ++i) {
+        const wxString& path = folders[i];
+        if (!path.IsEmpty() && !wxDir::Exists(path)) {
+            if (wxFileName::Mkdir(path, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL)) {
+                LOG_INFO("OnStartSorting: Created %s: %s", labels[i], path);
+            } else {
+                LOG_ERROR("OnStartSorting: Failed to create %s: %s", labels[i], path);
+                wxMessageBox(
+                    wxString::Format("Could not create %s:\n%s", labels[i], path),
+                    "Folder Creation Failed",
+                    wxOK | wxICON_ERROR,
+                    this);
+                return;
+            }
+        }
+    }
 
-    // bool success = frame->imageRepo.BuildFromFolder(baseFolder);
-    // if (!success) {
-    //     LOG_ERROR("OnStartSorting: Failed to build image repository for folder: %s", baseFolder);
-    //     wxMessageBox(
-    //         "Failed to scan the Base Folder for images.",
-    //         "Scan Failed",
-    //         wxOK | wxICON_ERROR,
-    //         this);
-    //     return;
-    // }
+    // 4) Scan base folder for images
+    LOG_DEBUG("Building image repository from base folder...");
+    frame->imageRepo.Clear();
+    if (!frame->imageRepo.BuildFromFolder(baseFolder)) {
+        LOG_ERROR("OnStartSorting: Failed to scan folder: %s", baseFolder);
+        wxMessageBox(
+            "Failed to scan the Base Folder for images.",
+            "Scan Failed",
+            wxOK | wxICON_ERROR,
+            this);
+        return;
+    }
 
-    // const size_t imageCount = frame->imageRepo.GetCount();
-    // LOG_DEBUG("Image repository built. Found %zu image(s).", imageCount);
+    const size_t imageCount = frame->imageRepo.GetCount();
+    LOG_DEBUG("Image repository built. Found %zu image(s).", imageCount);
 
-    // 4) No images found
-    // if (imageCount == 0) {
-    //     LOG_WARN("OnStartSorting: No supported images found in folder: %s", baseFolder);
-    //     wxMessageBox(
-    //         "No images were found in the selected Base Folder.",
-    //         "No Images Found",
-    //         wxOK | wxICON_INFORMATION,
-    //         this);
-    //     return;
-    // }
+    if (imageCount == 0) {
+        LOG_WARN("OnStartSorting: No supported images found in: %s", baseFolder);
+        wxMessageBox(
+            "No images were found in the selected Base Folder.",
+            "No Images Found",
+            wxOK | wxICON_INFORMATION,
+            this);
+        return;
+    }
 
     // 5) All checks passed
     LOG_DEBUG("OnStartSorting: Validation successful. Switching to SortPhotosPanel.");

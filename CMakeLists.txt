@@ -25,7 +25,7 @@ set(SOURCES
     src/ui/PhotoQuickSorterFrame.cpp
     src/ui/LogWindow.cpp
     src/core/FolderLocations.cpp
-    # src/core/ImageRepository.cpp
+    src/core/ImageRepository.cpp
     src/panels/MainMenuPanel.cpp
     src/panels/SortPhotosPanel.cpp
 )
@@ -36,7 +36,7 @@ set(HEADERS
     src/utils/logging.h
     src/ui/LogWindow.h
     src/core/FolderLocations.h
-    # src/core/ImageRepository.h
+    src/core/ImageRepository.h
     src/panels/MainMenuPanel.h
     src/panels/SortPhotosPanel.h
 )
@@ -65,6 +65,17 @@ endif()
 
 # Link against wxWidgets libraries discovered by find_package
 target_link_libraries(PhotoQuickSorter PRIVATE ${wxWidgets_LIBRARIES})
+
+# Link bundled wxWidgets third-party libs (not included by find_package automatically)
+# These are required by wxmsw33ud_core.lib for image format support
+target_link_libraries(PhotoQuickSorter PRIVATE
+    $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxwebpd.lib>
+    $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxjpegd.lib>
+    $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxpngd.lib>
+    $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxtiffd.lib>
+    $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxzlibd.lib>
+    $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxexpatd.lib>
+)
 
 # Optional: include your src folder for your own headers
 target_include_directories(PhotoQuickSorter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

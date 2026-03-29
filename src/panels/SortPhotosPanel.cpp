@@ -1,25 +1,611 @@
 #include "panels/SortPhotosPanel.h"
 #include "ui/PhotoQuickSorterFrame.h"
+#include "utils/logging.h"
+#include <wx/filename.h>
+#include <wx/filefn.h>
+#include <wx/dir.h>
+#include <wx/textfile.h>
+#include <algorithm>
+
+// ─────────────────────────────────────────────
+// Constructor
+// ─────────────────────────────────────────────
 
 SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
     : wxPanel(parent)
 {
-    m_infoLabel = new wxStaticText(this, wxID_ANY, "Sorting Screen", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
-    wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
-    sizer->Add(m_infoLabel, 1, wxALIGN_CENTER | wxALL, 10);
-    SetSizer(sizer);
+    m_statusLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+    m_imageBitmap = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
+
+    m_folder1Btn = new wxButton(this, ID_SORT_FOLDER1, "-> Folder 1");
+    m_folder2Btn = new wxButton(this, ID_SORT_FOLDER2, "-> Folder 2");
+    m_saveBtn    = new wxButton(this, ID_SORT_SAVE,    "Save");
+    m_deleteBtn  = new wxButton(this, ID_SORT_DELETE,  "Delete");
+    m_undoBtn    = new wxButton(this, ID_SORT_UNDO,    "Undo");
+
+    wxBoxSizer* btnSizer = new wxBoxSizer(wxHORIZONTAL);
+    btnSizer->Add(m_folder1Btn, 0, wxALL, 6);
+    btnSizer->Add(m_folder2Btn, 0, wxALL, 6);
+    btnSizer->Add(m_saveBtn,    0, wxALL, 6);
+    btnSizer->Add(m_deleteBtn,  0, wxALL, 6);
+    btnSizer->AddStretchSpacer();
+    btnSizer->Add(m_undoBtn,    0, wxALL, 6);
+
+    wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
+    vSizer->Add(m_statusLabel, 0, wxALIGN_CENTER | wxALL, 5);
+    vSizer->Add(m_imageBitmap, 1, wxEXPAND | wxALL, 10);
+    vSizer->Add(btnSizer,      0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+    SetSizer(vSizer);
+
+    m_folder1Btn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnFolder1, this);
+    m_folder2Btn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnFolder2, this);
+    m_saveBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnSave,    this);
+    m_deleteBtn ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnDelete,  this);
+    m_undoBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnUndo,    this);
+    Bind(wxEVT_SIZE, &SortPhotosPanel::OnSize, this);
+
+    SetButtonsEnabled(false);
 }
 
-void SortPhotosPanel::RefreshData() {
+// ─────────────────────────────────────────────
+// Session entry / reset
+// ─────────────────────────────────────────────
+
+void SortPhotosPanel::RefreshData()
+{
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
     if (!frame) return;
 
-    const auto& folders = frame->folderLocations;
-    wxString info = wxString::Format("Sorting from:\n%s\n %s\n %s",
-                                     folders.baseFolder,
-                                     folders.folder1,
-                                     folders.folder2);
+    LOG_DEBUG("RefreshData - Base: %s | Folder1: %s | Folder2: %s",
+              frame->folderLocations.baseFolder,
+              frame->folderLocations.folder1,
+              frame->folderLocations.folder2);
 
-    m_infoLabel->SetLabel(info);
-    Layout();  // reflow in case label size changes
+    // Reset session state
+    m_currentIndex    = 0;
+    m_inReview        = false;
+    m_folder1Shown    = false;
+    m_folder2Shown    = false;
+    m_deleteShown     = false;
+    m_folder1Confirmed = false;
+    m_folder2Confirmed = false;
+    m_deleteConfirmed  = false;
+    m_actionHistory.clear();
+    m_folder1List.clear();
+    m_folder2List.clear();
+    m_deleteList.clear();
+
+    // Crash recovery: check for leftover txt files from a previous session
+    CheckForPendingSession();
+
+    // If recovery populated lists and there's nothing left to sort, go straight to review
+    bool hasPending = !m_folder1List.empty() || !m_folder2List.empty() || !m_deleteList.empty();
+    if (hasPending && frame->imageRepo.GetCount() == 0) {
+        m_inReview = true;
+        AdvanceReviewStep();
+        return;
+    }
+
+    LoadCurrentImage();
+}
+
+// ─────────────────────────────────────────────
+// Crash recovery
+// ─────────────────────────────────────────────
+
+void SortPhotosPanel::CheckForPendingSession()
+{
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (!frame) return;
+
+    const wxString base = frame->folderLocations.baseFolder;
+    wxString f1txt  = base + wxFILE_SEP_PATH + "_pending_folder1.txt";
+    wxString f2txt  = base + wxFILE_SEP_PATH + "_pending_folder2.txt";
+    wxString deltxt = base + wxFILE_SEP_PATH + "_pending_deletes.txt";
+
+    auto loadTxt = [](const wxString& path, std::vector<wxString>& out) {
+        if (!wxFileExists(path)) return;
+        wxTextFile f;
+        if (!f.Open(path)) return;
+        for (size_t i = 0; i < f.GetLineCount(); ++i) {
+            wxString line = f.GetLine(i).Trim(true).Trim(false);
+            if (!line.IsEmpty() && wxFileExists(line))
+                out.push_back(line);
+        }
+        f.Close();
+    };
+
+    std::vector<wxString> tmp1, tmp2, tmpd;
+    loadTxt(f1txt,  tmp1);
+    loadTxt(f2txt,  tmp2);
+    loadTxt(deltxt, tmpd);
+
+    size_t total = tmp1.size() + tmp2.size() + tmpd.size();
+    if (total == 0) return;
+
+    int answer = wxMessageBox(
+        wxString::Format(
+            "A previous session left %zu unexecuted action(s) for this folder.\n"
+            "Resume the review?",
+            total),
+        "Resume Previous Session",
+        wxYES_NO | wxICON_QUESTION, this);
+
+    if (answer == wxYES) {
+        m_folder1List = std::move(tmp1);
+        m_folder2List = std::move(tmp2);
+        m_deleteList  = std::move(tmpd);
+        // Rebuild a flat action history (interleaving lost, but only lists matter for review)
+        for (const auto& p : m_folder1List) m_actionHistory.push_back({p, SortAction::MoveToFolder1});
+        for (const auto& p : m_folder2List) m_actionHistory.push_back({p, SortAction::MoveToFolder2});
+        for (const auto& p : m_deleteList)  m_actionHistory.push_back({p, SortAction::Delete});
+        LOG_INFO("Resumed previous session: %zu F1, %zu F2, %zu delete",
+                 m_folder1List.size(), m_folder2List.size(), m_deleteList.size());
+    } else {
+        if (wxFileExists(f1txt))  wxRemoveFile(f1txt);
+        if (wxFileExists(f2txt))  wxRemoveFile(f2txt);
+        if (wxFileExists(deltxt)) wxRemoveFile(deltxt);
+        LOG_INFO("Discarded previous session pending actions");
+    }
+}
+
+// ─────────────────────────────────────────────
+// Image display
+// ─────────────────────────────────────────────
+
+void SortPhotosPanel::LoadCurrentImage()
+{
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (!frame) return;
+
+    const ImageInfo* info = frame->imageRepo.GetAt(m_currentIndex);
+    if (!info) {
+        OnAllImagesActedUpon();
+        return;
+    }
+
+    m_statusLabel->SetLabel(wxString::Format("Image %zu of %zu  —  %s   [%zu recorded]",
+        m_currentIndex + 1,
+        frame->imageRepo.GetCount(),
+        wxFileName(info->path).GetFullName(),
+        m_actionHistory.size()));
+
+    wxImage img(info->path, wxBITMAP_TYPE_ANY);
+    if (img.IsOk()) {
+        Layout();
+        wxSize available = m_imageBitmap->GetSize();
+        if (available.x > 1 && available.y > 1) {
+            double scaleX = (double)available.x / img.GetWidth();
+            double scaleY = (double)available.y / img.GetHeight();
+            double scale  = std::min(scaleX, scaleY);
+            if (scale < 1.0)
+                img = img.Scale((int)(img.GetWidth() * scale),
+                                (int)(img.GetHeight() * scale),
+                                wxIMAGE_QUALITY_HIGH);
+        }
+        m_imageBitmap->SetBitmap(wxBitmap(img));
+    } else {
+        m_imageBitmap->SetBitmap(wxNullBitmap);
+        LOG_WARN("Could not load image: %s", info->path);
+    }
+
+    SetButtonsEnabled(true);
+    Layout();
+}
+
+// ─────────────────────────────────────────────
+// Action recording
+// ─────────────────────────────────────────────
+
+void SortPhotosPanel::RecordAction(SortAction type)
+{
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (!frame) return;
+
+    const ImageInfo* info = frame->imageRepo.GetAt(m_currentIndex);
+    if (!info) return;
+
+    m_actionHistory.push_back({info->path, type});
+
+    switch (type) {
+        case SortAction::MoveToFolder1:
+            m_folder1List.push_back(info->path);
+            PersistList(m_folder1List, "_pending_folder1.txt");
+            break;
+        case SortAction::MoveToFolder2:
+            m_folder2List.push_back(info->path);
+            PersistList(m_folder2List, "_pending_folder2.txt");
+            break;
+        case SortAction::Delete:
+            m_deleteList.push_back(info->path);
+            PersistList(m_deleteList, "_pending_deletes.txt");
+            break;
+        case SortAction::Save:
+            break; // no persistence needed
+    }
+
+    LOG_DEBUG("RecordAction: %s -> action %d (history size: %zu)",
+              info->path, (int)type, m_actionHistory.size());
+
+    ++m_currentIndex;
+    LoadCurrentImage();
+}
+
+void SortPhotosPanel::PersistList(const std::vector<wxString>& list, const wxString& filename)
+{
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (!frame) return;
+
+    wxString path = frame->folderLocations.baseFolder + wxFILE_SEP_PATH + filename;
+
+    if (list.empty()) {
+        if (wxFileExists(path)) wxRemoveFile(path);
+        return;
+    }
+
+    wxTextFile f;
+    if (wxFileExists(path)) {
+        if (!f.Open(path)) return;
+        f.Clear();
+    } else {
+        if (!f.Create(path)) return;
+    }
+    for (const auto& entry : list) f.AddLine(entry);
+    f.Write();
+    f.Close();
+}
+
+// ─────────────────────────────────────────────
+// Undo
+// ─────────────────────────────────────────────
+
+void SortPhotosPanel::OnUndo(wxCommandEvent& WXUNUSED(evt))
+{
+    if (m_actionHistory.empty()) return;
+
+    PendingAction undone = m_actionHistory.back();
+    m_actionHistory.pop_back();
+    --m_currentIndex;
+
+    auto removeFrom = [&](std::vector<wxString>& list) {
+        auto it = std::find(list.begin(), list.end(), undone.imagePath);
+        if (it != list.end()) list.erase(it);
+    };
+
+    switch (undone.type) {
+        case SortAction::MoveToFolder1:
+            removeFrom(m_folder1List);
+            PersistList(m_folder1List, "_pending_folder1.txt");
+            break;
+        case SortAction::MoveToFolder2:
+            removeFrom(m_folder2List);
+            PersistList(m_folder2List, "_pending_folder2.txt");
+            break;
+        case SortAction::Delete:
+            removeFrom(m_deleteList);
+            PersistList(m_deleteList, "_pending_deletes.txt");
+            break;
+        case SortAction::Save:
+            break;
+    }
+
+    LOG_DEBUG("Undo: restored %s (history size now: %zu)", undone.imagePath, m_actionHistory.size());
+    LoadCurrentImage();
+}
+
+// ─────────────────────────────────────────────
+// End-of-session review
+// ─────────────────────────────────────────────
+
+void SortPhotosPanel::OnAllImagesActedUpon()
+{
+    bool hasPending = !m_folder1List.empty() || !m_folder2List.empty() || !m_deleteList.empty();
+    if (!hasPending) {
+        ShowDoneState();
+        return;
+    }
+
+    m_inReview = true;
+
+    // Destroy sorting UI and null all sorting-UI pointers
+    DestroyChildren();
+    m_imageBitmap = nullptr;
+    m_statusLabel = nullptr;
+    m_folder1Btn  = nullptr;
+    m_folder2Btn  = nullptr;
+    m_saveBtn     = nullptr;
+    m_deleteBtn   = nullptr;
+    m_undoBtn     = nullptr;
+
+    AdvanceReviewStep();
+}
+
+void SortPhotosPanel::AdvanceReviewStep()
+{
+    // Try each step in order; skip if already shown or list is empty
+    if (!m_folder1Shown && !m_folder1List.empty()) {
+        m_folder1Shown      = true;
+        m_currentReviewStep = ReviewStep::Folder1;
+        ShowReviewStep();
+        return;
+    }
+    if (!m_folder2Shown && !m_folder2List.empty()) {
+        m_folder2Shown      = true;
+        m_currentReviewStep = ReviewStep::Folder2;
+        ShowReviewStep();
+        return;
+    }
+    if (!m_deleteShown && !m_deleteList.empty()) {
+        m_deleteShown       = true;
+        m_currentReviewStep = ReviewStep::Delete;
+        ShowReviewStep();
+        return;
+    }
+
+    // All steps shown — execute and return to main menu
+    ExecuteConfirmedActions();
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (frame) frame->ShowMainMenuPanel();
+}
+
+void SortPhotosPanel::ShowReviewStep()
+{
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (!frame) return;
+
+    const std::vector<wxString>* list = nullptr;
+    wxString titleText, confirmLabel, skipLabel;
+
+    switch (m_currentReviewStep) {
+        case ReviewStep::Folder1:
+            list         = &m_folder1List;
+            titleText    = wxString::Format("-> Folder 1  —  %zu image(s) to move", m_folder1List.size());
+            confirmLabel = "Confirm Move";
+            skipLabel    = "Skip (keep in base folder)";
+            break;
+        case ReviewStep::Folder2:
+            list         = &m_folder2List;
+            titleText    = wxString::Format("-> Folder 2  —  %zu image(s) to move", m_folder2List.size());
+            confirmLabel = "Confirm Move";
+            skipLabel    = "Skip (keep in base folder)";
+            break;
+        case ReviewStep::Delete:
+            list         = &m_deleteList;
+            titleText    = wxString::Format("Delete  —  %zu image(s)", m_deleteList.size());
+            confirmLabel = "Confirm Delete";
+            skipLabel    = "Keep All";
+            break;
+    }
+
+    Freeze();
+    DestroyChildren(); // safe on subsequent steps too
+
+    wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
+
+    wxStaticText* title = new wxStaticText(this, wxID_ANY, titleText,
+                                           wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+    vSizer->Add(title, 0, wxALIGN_CENTER | wxALL, 8);
+
+    // Scrollable thumbnail grid
+    wxScrolledWindow* scroll = new wxScrolledWindow(this, wxID_ANY);
+    scroll->SetScrollRate(0, 20);
+
+    wxWrapSizer* wrapSizer = new wxWrapSizer(wxHORIZONTAL);
+
+    for (const wxString& imgPath : *list) {
+        wxImage img;
+        if (wxFileExists(imgPath))
+            img.LoadFile(imgPath, wxBITMAP_TYPE_ANY);
+
+        wxBitmap bmp;
+        if (img.IsOk()) {
+            double scaleX = 120.0 / img.GetWidth();
+            double scaleY = 120.0 / img.GetHeight();
+            double scale  = std::min(scaleX, scaleY);
+            img = img.Scale((int)(img.GetWidth() * scale),
+                            (int)(img.GetHeight() * scale),
+                            wxIMAGE_QUALITY_NORMAL);
+            bmp = wxBitmap(img);
+        }
+
+        wxStaticBitmap* thumb = new wxStaticBitmap(scroll, wxID_ANY, bmp);
+        thumb->SetMinSize(wxSize(120, 120));
+
+        wxString fname = wxFileName(imgPath).GetFullName();
+        if (fname.length() > 16) fname = fname.Left(14) + "..";
+        wxStaticText* lbl = new wxStaticText(scroll, wxID_ANY, fname,
+                                              wxDefaultPosition, wxSize(128, -1),
+                                              wxALIGN_CENTER | wxST_ELLIPSIZE_END);
+
+        wxBoxSizer* thumbBox = new wxBoxSizer(wxVERTICAL);
+        thumbBox->Add(thumb, 0, wxALIGN_CENTER | wxALL, 4);
+        thumbBox->Add(lbl,   0, wxALIGN_CENTER);
+        wrapSizer->Add(thumbBox, 0, wxALL, 4);
+    }
+
+    scroll->SetSizer(wrapSizer);
+    vSizer->Add(scroll, 1, wxEXPAND | wxALL, 6);
+
+    // Buttons
+    wxButton* confirmBtn = new wxButton(this, ID_SORT_STEP_CONFIRM, confirmLabel);
+    wxButton* skipBtn    = new wxButton(this, ID_SORT_STEP_SKIP,    skipLabel);
+
+    if (m_currentReviewStep == ReviewStep::Delete) {
+        confirmBtn->SetBackgroundColour(wxColour(200, 60, 60));
+        confirmBtn->SetForegroundColour(*wxWHITE);
+    }
+
+    wxBoxSizer* btnRow = new wxBoxSizer(wxHORIZONTAL);
+    btnRow->Add(confirmBtn, 0, wxALL, 8);
+    btnRow->Add(skipBtn,    0, wxALL, 8);
+    vSizer->Add(btnRow, 0, wxALIGN_CENTER | wxBOTTOM, 10);
+
+    confirmBtn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnStepConfirm, this);
+    skipBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnStepSkip,    this);
+
+    SetSizer(vSizer);
+    Thaw();
+    Layout();
+}
+
+void SortPhotosPanel::OnStepConfirm(wxCommandEvent& WXUNUSED(evt))
+{
+    switch (m_currentReviewStep) {
+        case ReviewStep::Folder1: m_folder1Confirmed = true; break;
+        case ReviewStep::Folder2: m_folder2Confirmed = true; break;
+        case ReviewStep::Delete:  m_deleteConfirmed  = true; break;
+    }
+    AdvanceReviewStep();
+}
+
+void SortPhotosPanel::OnStepSkip(wxCommandEvent& WXUNUSED(evt))
+{
+    // confirmed flag stays false — AdvanceReviewStep will skip execution for this category
+    AdvanceReviewStep();
+}
+
+// ─────────────────────────────────────────────
+// Execution
+// ─────────────────────────────────────────────
+
+void SortPhotosPanel::ExecuteFileMove(const wxString& srcPath, const wxString& destFolder)
+{
+    if (!wxFileExists(srcPath)) {
+        LOG_WARN("ExecuteFileMove: source no longer exists: %s", srcPath);
+        return;
+    }
+
+    if (!wxDir::Exists(destFolder)) {
+        if (!wxFileName::Mkdir(destFolder, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL)) {
+            LOG_ERROR("ExecuteFileMove: could not create folder: %s", destFolder);
+            return;
+        }
+    }
+
+    wxFileName srcFn(srcPath);
+    wxString dest = destFolder + wxFILE_SEP_PATH + srcFn.GetFullName();
+
+    int suffix = 1;
+    while (wxFileExists(dest)) {
+        dest = destFolder + wxFILE_SEP_PATH
+             + srcFn.GetName() + wxString::Format("_%d", suffix++)
+             + "." + srcFn.GetExt();
+    }
+
+    if (!wxCopyFile(srcPath, dest)) {
+        LOG_ERROR("ExecuteFileMove: copy failed: %s -> %s", srcPath, dest);
+        return;
+    }
+    if (!wxRemoveFile(srcPath))
+        LOG_WARN("ExecuteFileMove: copy ok but source not deleted: %s", srcPath);
+
+    LOG_DEBUG("ExecuteFileMove: moved %s -> %s", srcPath, dest);
+}
+
+void SortPhotosPanel::ExecuteConfirmedActions()
+{
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (!frame) return;
+
+    for (const auto& action : m_actionHistory) {
+        switch (action.type) {
+            case SortAction::MoveToFolder1:
+                if (m_folder1Confirmed)
+                    ExecuteFileMove(action.imagePath, frame->folderLocations.folder1);
+                break;
+            case SortAction::MoveToFolder2:
+                if (m_folder2Confirmed)
+                    ExecuteFileMove(action.imagePath, frame->folderLocations.folder2);
+                break;
+            case SortAction::Delete:
+                if (m_deleteConfirmed && wxFileExists(action.imagePath))
+                    wxRemoveFile(action.imagePath);
+                break;
+            case SortAction::Save:
+                break;
+        }
+    }
+
+    // Clean up all persistence files
+    const wxString base = frame->folderLocations.baseFolder;
+    auto tryRemove = [&](const wxString& name) {
+        wxString p = base + wxFILE_SEP_PATH + name;
+        if (wxFileExists(p)) wxRemoveFile(p);
+    };
+    tryRemove("_pending_folder1.txt");
+    tryRemove("_pending_folder2.txt");
+    tryRemove("_pending_deletes.txt");
+
+    m_folder1List.clear();
+    m_folder2List.clear();
+    m_deleteList.clear();
+    m_actionHistory.clear();
+
+    LOG_INFO("ExecuteConfirmedActions complete");
+}
+
+// ─────────────────────────────────────────────
+// Button handlers (sorting phase)
+// ─────────────────────────────────────────────
+
+void SortPhotosPanel::OnFolder1(wxCommandEvent& WXUNUSED(evt))
+{
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (!frame) return;
+    if (frame->folderLocations.folder1.IsEmpty()) {
+        wxMessageBox("Folder 1 path is not set.", "No Folder Set", wxOK | wxICON_WARNING, this);
+        return;
+    }
+    RecordAction(SortAction::MoveToFolder1);
+}
+
+void SortPhotosPanel::OnFolder2(wxCommandEvent& WXUNUSED(evt))
+{
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (!frame) return;
+    if (frame->folderLocations.folder2.IsEmpty()) {
+        wxMessageBox("Folder 2 path is not set.", "No Folder Set", wxOK | wxICON_WARNING, this);
+        return;
+    }
+    RecordAction(SortAction::MoveToFolder2);
+}
+
+void SortPhotosPanel::OnSave(wxCommandEvent& WXUNUSED(evt))
+{
+    RecordAction(SortAction::Save);
+}
+
+void SortPhotosPanel::OnDelete(wxCommandEvent& WXUNUSED(evt))
+{
+    RecordAction(SortAction::Delete);
+}
+
+// ─────────────────────────────────────────────
+// Utility
+// ─────────────────────────────────────────────
+
+void SortPhotosPanel::SetButtonsEnabled(bool enabled)
+{
+    if (m_folder1Btn) m_folder1Btn->Enable(enabled);
+    if (m_folder2Btn) m_folder2Btn->Enable(enabled);
+    if (m_saveBtn)    m_saveBtn   ->Enable(enabled);
+    if (m_deleteBtn)  m_deleteBtn ->Enable(enabled);
+    if (m_undoBtn)    m_undoBtn   ->Enable(enabled);
+}
+
+void SortPhotosPanel::ShowDoneState()
+{
+    if (m_statusLabel) m_statusLabel->SetLabel("All done!");
+    if (m_imageBitmap) m_imageBitmap->SetBitmap(wxNullBitmap);
+    SetButtonsEnabled(false);
+    Layout();
+}
+
+void SortPhotosPanel::OnSize(wxSizeEvent& evt)
+{
+    evt.Skip();
+    if (m_inReview) return;
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (frame && frame->imageRepo.GetCount() > 0 && IsShown() && m_imageBitmap)
+        LoadCurrentImage();
 }

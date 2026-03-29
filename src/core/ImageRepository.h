@@ -2,7 +2,9 @@
 
 #include <wx/string.h>
 #include <wx/datetime.h>
+#include <wx/arrstr.h>
 #include <vector>
+#include <cstddef>
 
 struct ImageInfo {
     wxString path;
@@ -37,7 +39,7 @@ public:
 
     void Add(const ImageInfo& info);
     bool RemoveAt(size_t idx);
-    ssize_t FindByPath(const wxString& path) const; // -1 if not found
+    ptrdiff_t FindByPath(const wxString& path) const; // -1 if not found
 
 private:
     std::vector<ImageInfo> m_images;

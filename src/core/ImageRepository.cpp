@@ -94,8 +94,7 @@ bool ImageRepository::BuildFromFolder(const wxString& baseFolder,
     for (const auto& f : allFiles) {
         wxFileName fn(f);
         wxULongLong ull = fn.GetSize(); // returns wxULongLong
-        unsigned long long s = static_cast<unsigned long long>(ull); // cast to primitive
-        wxUint64 size = static_cast<wxUint64>(s);
+        wxUint64 size = static_cast<wxUint64>(ull.GetValue());
 
         wxDateTime modTime;
         // GetTimes returns bool; we'll try to get mtime; if not available leave invalid
@@ -183,12 +182,8 @@ bool ImageRepository::LoadFromFile(const wxString& loadPath)
         if (parts.size() >= 3 && !parts[2].IsEmpty()) {
             // Try parsing ISO combined; different wx versions have different overloads.
             // Try the common parse functions; if none succeed, leave modTime invalid.
-            if (!wxDateTime::ParseISOCombined(parts[2], &modTime)) {
-                // Try RFC822 parse as fallback
-                if (!wxDateTime::ParseRfc2822(parts[2], &modTime)) {
-                    // leave invalid
-                }
-            }
+            modTime.ParseISOCombined(parts[2]);
+            // if parsing fails, modTime remains invalid — acceptable
         }
         m_images.emplace_back(path, size, modTime);
     }
@@ -221,10 +216,10 @@ bool ImageRepository::RemoveAt(size_t idx)
     return true;
 }
 
-ssize_t ImageRepository::FindByPath(const wxString& path) const
+ptrdiff_t ImageRepository::FindByPath(const wxString& path) const
 {
     for (size_t i = 0; i < m_images.size(); ++i) {
-        if (m_images[i].path == path) return static_cast<ssize_t>(i);
+        if (m_images[i].path == path) return static_cast<ptrdiff_t>(i);
     }
     return -1;
 }
