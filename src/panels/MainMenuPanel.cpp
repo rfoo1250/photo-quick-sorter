@@ -124,6 +124,11 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
         return;
     }
 
+    // Read text boxes as the source of truth
+    frame->folderLocations.baseFolder = m_baseFolderText->GetValue().Trim(true).Trim(false);
+    frame->folderLocations.folder1    = m_folder1Text->GetValue().Trim(true).Trim(false);
+    frame->folderLocations.folder2    = m_folder2Text->GetValue().Trim(true).Trim(false);
+
     const wxString baseFolder = frame->folderLocations.baseFolder;
     LOG_DEBUG("Base folder path: '%s'", baseFolder);
 
