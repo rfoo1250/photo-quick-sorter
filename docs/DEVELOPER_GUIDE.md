@@ -6,7 +6,7 @@
 |------|---------|-------|
 | CMake | 3.16+ | |
 | MSVC | VS 2019/2022 | x64 toolchain |
-| wxWidgets | 3.3.1 | Static build, placed at `C:/Libraries/wxWidgets-3.3.1` |
+| wxWidgets | 3.3.1 | Static build |
 
 wxWidgets must be built as a **static debug** library. Before building, update `wxWidgets_ROOT_DIR` and `wxWidgets_LIB_DIR` in [CMakeLists.txt](../CMakeLists.txt) to match your local installation path.
 
