@@ -83,7 +83,7 @@ void SortPhotosPanel::BuildSortingUI()
     imageCell->Add(m_imageBitmap,    0, wxALIGN_CENTER);
 
     grid->Add(m_folder1Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
-    grid->Add(imageCell,    1, wxEXPAND | wxALIGN_CENTER, 10);
+    grid->Add(imageCell,    1, wxEXPAND, 10);
     grid->Add(m_folder2Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
 
     grid->Add(0, 0);

@@ -1,5 +1,6 @@
 #pragma once
 #include <wx/wx.h>
+#include <wx/scrolwin.h>
 
 enum {
     ID_BROWSE_BASE = wxID_HIGHEST + 1,
@@ -16,7 +17,12 @@ public:
 private:
     void OnBrowseFolder(wxCommandEvent& event);
     void OnStartSorting(wxCommandEvent& event);
-    wxTextCtrl* m_baseFolderText = nullptr;
-    wxTextCtrl* m_folder1Text = nullptr;
-    wxTextCtrl* m_folder2Text = nullptr;
+    void OnBaseFolderFocusLost(wxFocusEvent& event);
+    void OnSize(wxSizeEvent& event);
+    void RefreshPreview(const wxString& folderPath);
+    wxTextCtrl*       m_baseFolderText  = nullptr;
+    wxTextCtrl*       m_folder1Text     = nullptr;
+    wxTextCtrl*       m_folder2Text     = nullptr;
+    wxScrolledWindow* m_previewScroll   = nullptr;
+    wxString          m_previewFolder;
 };

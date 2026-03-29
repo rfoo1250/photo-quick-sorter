@@ -6,6 +6,8 @@
 #include <wx/filename.h>
 #include <wx/dir.h>
 #include <wx/filefn.h>
+#include <wx/scrolwin.h>
+#include <algorithm>
 
 namespace {
 
@@ -86,7 +88,7 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     m_folder2Text = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(400, -1));
     wxButton *folder2NameBrowseBtn = new wxButton(this, ID_BROWSE_2, "Browse");
     // image test
-    wxString imagePath = projectRoot.GetFullPath() + "/assets/Nice_Nature.jpeg";
+    // wxString imagePath = projectRoot.GetFullPath() + "/assets/Nice_Nature.jpeg";
 
     wxButton *toSortPanelBtn = new wxButton(this, ID_TO_SORT_PANEL, "Start sorting!");
 
@@ -106,26 +108,37 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     makeRow(folder1NameLabel, m_folder1Text, folder1NameBrowseBtn);
     makeRow(folder2NameLabel, m_folder2Text, folder2NameBrowseBtn);
 
-    // Image
-    if (wxFileExists(imagePath))
-    {
-        wxImage::AddHandler(new wxJPEGHandler()); // always forgot this
-        wxImage logoImage(imagePath, wxBITMAP_TYPE_JPEG);
-        int maxHeight = 200;
-        if (logoImage.GetHeight() > maxHeight)
-        {
-            double scale = (double)maxHeight / logoImage.GetHeight();
-            logoImage = logoImage.Scale(logoImage.GetWidth() * scale, maxHeight, wxIMAGE_QUALITY_HIGH);
-        }
-        wxStaticBitmap *logo = new wxStaticBitmap(this, wxID_ANY, wxBitmap(logoImage));
-        vbox->Add(logo, 0, wxALIGN_CENTER | wxBOTTOM, 10);
-    }
-    else
-    {
-        vbox->Add(new wxStaticText(this, wxID_ANY, "Image not found"), 0, wxALIGN_CENTER | wxBOTTOM, 10);
-    }
+    // Image test (kept for reference)
+    // if (wxFileExists(imagePath))
+    // {
+    //     wxImage::AddHandler(new wxJPEGHandler()); // always forgot this
+    //     wxImage logoImage(imagePath, wxBITMAP_TYPE_JPEG);
+    //     int maxHeight = 200;
+    //     if (logoImage.GetHeight() > maxHeight)
+    //     {
+    //         double scale = (double)maxHeight / logoImage.GetHeight();
+    //         logoImage = logoImage.Scale(logoImage.GetWidth() * scale, maxHeight, wxIMAGE_QUALITY_HIGH);
+    //     }
+    //     wxStaticBitmap *logo = new wxStaticBitmap(this, wxID_ANY, wxBitmap(logoImage));
+    //     vbox->Add(logo, 0, wxALIGN_CENTER | wxBOTTOM, 10);
+    // }
+    // else
+    // {
+    //     vbox->Add(new wxStaticText(this, wxID_ANY, "Image not found"), 0, wxALIGN_CENTER | wxBOTTOM, 10);
+    // }
 
-    vbox->Add(toSortPanelBtn, 0, wxEXPAND | wxALL, 5);
+    // --- Base folder preview ---
+    m_previewScroll = new wxScrolledWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
+    m_previewScroll->SetScrollRate(0, 20);
+    // Initial hint
+    wxStaticText* hint = new wxStaticText(m_previewScroll, wxID_ANY,
+        "Select a Base Folder to preview images.", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+    wxBoxSizer* hintSizer = new wxBoxSizer(wxVERTICAL);
+    hintSizer->Add(hint, 0, wxALIGN_CENTER | wxALL, 20);
+    m_previewScroll->SetSizer(hintSizer);
+
+    vbox->Add(m_previewScroll, 1, wxEXPAND | wxALL, 5);
+    vbox->Add(toSortPanelBtn, 0, wxEXPAND | wxALL, 8);
     SetSizer(vbox);
 
     // --- Events ---
@@ -133,6 +146,8 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     folder1NameBrowseBtn->Bind(wxEVT_BUTTON, &MainMenuPanel::OnBrowseFolder, this);
     folder2NameBrowseBtn->Bind(wxEVT_BUTTON, &MainMenuPanel::OnBrowseFolder, this);
     toSortPanelBtn->Bind(wxEVT_BUTTON, &MainMenuPanel::OnStartSorting, this);
+    m_baseFolderText->Bind(wxEVT_KILL_FOCUS, &MainMenuPanel::OnBaseFolderFocusLost, this);
+    Bind(wxEVT_SIZE, &MainMenuPanel::OnSize, this);
 }
 
 void MainMenuPanel::OnBrowseFolder(wxCommandEvent &event)
@@ -163,7 +178,7 @@ void MainMenuPanel::OnBrowseFolder(wxCommandEvent &event)
             m_baseFolderText->SetValue(path);
             frame->folderLocations.baseFolder = path;
             LOG_DEBUG("Base folder: %s", frame->folderLocations.baseFolder);
-            // remove log message when done
+            RefreshPreview(path);
         }
         else if (id == ID_BROWSE_1)
         {
@@ -178,6 +193,109 @@ void MainMenuPanel::OnBrowseFolder(wxCommandEvent &event)
             LOG_DEBUG("Folder 2: %s", frame->folderLocations.folder2);
         }
     }
+}
+
+void MainMenuPanel::OnBaseFolderFocusLost(wxFocusEvent& event)
+{
+    event.Skip(); // always skip focus events
+    wxString path = m_baseFolderText->GetValue().Trim(true).Trim(false);
+    RefreshPreview(path);
+}
+
+void MainMenuPanel::OnSize(wxSizeEvent& event)
+{
+    event.Skip();
+    if (!m_previewFolder.IsEmpty())
+        RefreshPreview(m_previewFolder);
+}
+
+void MainMenuPanel::RefreshPreview(const wxString& folderPath)
+{
+    if (!m_previewScroll) return;
+
+    m_previewFolder = folderPath;
+    m_previewScroll->Freeze();
+    m_previewScroll->DestroyChildren();
+
+    auto showHint = [&](const wxString& msg) {
+        wxStaticText* lbl = new wxStaticText(m_previewScroll, wxID_ANY, msg,
+                                             wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+        wxBoxSizer* s = new wxBoxSizer(wxVERTICAL);
+        s->Add(lbl, 0, wxALIGN_CENTER | wxALL, 20);
+        m_previewScroll->SetSizer(s);
+        m_previewScroll->FitInside();
+        m_previewScroll->Thaw();
+        Layout();
+    };
+
+    if (folderPath.IsEmpty() || !wxDir::Exists(folderPath)) {
+        showHint("Select a Base Folder to preview images.");
+        return;
+    }
+
+    // Collect image files (same extensions as ImageRepository)
+    const wxString exts[] = { "*.jpg", "*.jpeg", "*.png", "*.webp", "*.heic" };
+    wxArrayString files;
+    wxDir dir(folderPath);
+    if (dir.IsOpened()) {
+        for (const auto& ext : exts) {
+            wxString fn;
+            bool has = dir.GetFirst(&fn, ext, wxDIR_FILES);
+            while (has) {
+                files.Add(folderPath + wxFILE_SEP_PATH + fn);
+                has = dir.GetNext(&fn);
+            }
+        }
+    }
+    files.Sort();
+
+    if (files.IsEmpty()) {
+        showHint("No supported images found in this folder.");
+        return;
+    }
+
+    // Thumb size: fill 3 columns across ~92% of the scroll area width
+    const int padding = 12; // gap between cells (each side)
+    int scrollW = m_previewScroll->GetClientSize().x;
+    if (scrollW < 60) scrollW = GetClientSize().x; // fallback before first layout
+    int thumbSize = (int)((scrollW * 0.92 - padding * 4) / 3);
+    if (thumbSize < 60) thumbSize = 60;
+
+    // 3-column grid
+    wxFlexGridSizer* grid = new wxFlexGridSizer(0, 3, padding, padding);
+
+    for (const wxString& path : files) {
+        wxImage img;
+        img.LoadFile(path, wxBITMAP_TYPE_ANY);
+
+        wxBitmap bmp;
+        if (img.IsOk()) {
+            double sx = (double)thumbSize / img.GetWidth();
+            double sy = (double)thumbSize / img.GetHeight();
+            double s  = std::min(sx, sy);
+            img = img.Scale((int)(img.GetWidth() * s), (int)(img.GetHeight() * s), wxIMAGE_QUALITY_NORMAL);
+            bmp = wxBitmap(img);
+        }
+
+        wxStaticBitmap* thumb = new wxStaticBitmap(m_previewScroll, wxID_ANY, bmp);
+        thumb->SetMinSize(wxSize(thumbSize, thumbSize));
+
+        wxStaticText* lbl = new wxStaticText(m_previewScroll, wxID_ANY,
+            wxFileName(path).GetFullName(),
+            wxDefaultPosition, wxSize(thumbSize, -1),
+            wxALIGN_CENTER | wxST_ELLIPSIZE_END);
+
+        wxBoxSizer* cell = new wxBoxSizer(wxVERTICAL);
+        cell->Add(thumb, 0, wxALIGN_CENTER | wxBOTTOM, 3);
+        cell->Add(lbl,   0, wxALIGN_CENTER);
+
+        grid->Add(cell, 0, wxALIGN_TOP | wxALIGN_CENTER_HORIZONTAL | wxALL, 4);
+    }
+
+    m_previewScroll->SetSizer(grid);
+    m_previewScroll->FitInside();
+    m_previewScroll->Thaw();
+    Layout();
 }
 
 void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
