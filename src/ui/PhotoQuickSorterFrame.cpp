@@ -23,6 +23,7 @@ PhotoQuickSorterFrame::PhotoQuickSorterFrame(const wxString &title)
     frameSizer->Add(m_sortPhotosPanel, 1, wxEXPAND);
 
     SetSizer(frameSizer);
+    Centre();
 
     // hide the sort panel at startup so only main menu shows
     m_sortPhotosPanel->Hide();
