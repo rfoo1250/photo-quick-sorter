@@ -22,6 +22,7 @@ enum class ReviewStep  { Folder1, Folder2, Delete };
 class SortPhotosPanel : public wxPanel {
 public:
     explicit SortPhotosPanel(wxWindow* parent);
+    ~SortPhotosPanel();
     void RefreshData();
 
 private:
@@ -68,6 +69,9 @@ private:
     // --- crash recovery ---
     void CheckForPendingSession();
 
+    // --- helpers ---
+    wxBitmap LoadKeycap(const wxString& filename, int size = 28) const;
+
     // --- event handlers ---
     void OnFolder1(wxCommandEvent& evt);
     void OnFolder2(wxCommandEvent& evt);
@@ -77,4 +81,5 @@ private:
     void OnStepConfirm(wxCommandEvent& evt);
     void OnStepSkip(wxCommandEvent& evt);
     void OnSize(wxSizeEvent& evt);
+    void OnKeyDown(wxKeyEvent& evt);
 };

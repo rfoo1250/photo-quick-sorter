@@ -5,7 +5,27 @@
 #include <wx/filefn.h>
 #include <wx/dir.h>
 #include <wx/textfile.h>
+#include <wx/stdpaths.h>
 #include <algorithm>
+
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
+wxBitmap SortPhotosPanel::LoadKeycap(const wxString& filename, int size) const
+{
+    wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
+    exe.Normalize();
+    exe.SetFullName("");
+    exe.RemoveLastDir();
+    exe.RemoveLastDir();
+    wxString path = exe.GetFullPath() + "assets/single-keys-blank/200dpi/" + filename;
+    if (!wxFileExists(path)) return wxNullBitmap;
+    wxImage img(path, wxBITMAP_TYPE_PNG);
+    if (!img.IsOk()) return wxNullBitmap;
+    img = img.Scale(size, size, wxIMAGE_QUALITY_HIGH);
+    return wxBitmap(img);
+}
 
 // ─────────────────────────────────────────────
 // Constructor
@@ -17,34 +37,71 @@ SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
     m_statusLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
     m_imageBitmap = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
 
-    m_folder1Btn = new wxButton(this, ID_SORT_FOLDER1, "-> Folder 1");
-    m_folder2Btn = new wxButton(this, ID_SORT_FOLDER2, "-> Folder 2");
+    m_folder1Btn = new wxButton(this, ID_SORT_FOLDER1, "Folder 1");
+    m_folder2Btn = new wxButton(this, ID_SORT_FOLDER2, "Folder 2");
     m_saveBtn    = new wxButton(this, ID_SORT_SAVE,    "Save");
     m_deleteBtn  = new wxButton(this, ID_SORT_DELETE,  "Delete");
     m_undoBtn    = new wxButton(this, ID_SORT_UNDO,    "Undo");
 
-    wxBoxSizer* btnSizer = new wxBoxSizer(wxHORIZONTAL);
-    btnSizer->Add(m_folder1Btn, 0, wxALL, 6);
-    btnSizer->Add(m_folder2Btn, 0, wxALL, 6);
-    btnSizer->Add(m_saveBtn,    0, wxALL, 6);
-    btnSizer->Add(m_deleteBtn,  0, wxALL, 6);
-    btnSizer->AddStretchSpacer();
-    btnSizer->Add(m_undoBtn,    0, wxALL, 6);
+    wxBitmap icLeft  = LoadKeycap("cursor-left.png");
+    wxBitmap icRight = LoadKeycap("cursor-right.png");
+    wxBitmap icUp    = LoadKeycap("cursor-up.png");
+    wxBitmap icDown  = LoadKeycap("cursor-down.png");
+    wxBitmap icZ     = LoadKeycap("z.png");
+
+    if (icLeft.IsOk())  { m_folder1Btn->SetBitmap(icLeft);  m_folder1Btn->SetBitmapPosition(wxLEFT);   }
+    if (icRight.IsOk()) { m_folder2Btn->SetBitmap(icRight); m_folder2Btn->SetBitmapPosition(wxRIGHT);  }
+    if (icUp.IsOk())    { m_saveBtn->SetBitmap(icUp);       m_saveBtn->SetBitmapPosition(wxTOP);       }
+    if (icDown.IsOk())  { m_deleteBtn->SetBitmap(icDown);   m_deleteBtn->SetBitmapPosition(wxBOTTOM);  }
+    if (icZ.IsOk())     { m_undoBtn->SetBitmap(icZ);        m_undoBtn->SetBitmapPosition(wxLEFT);      }
+
+    // Larger buttons
+    m_folder1Btn->SetMinSize(wxSize(130, 55));
+    m_folder2Btn->SetMinSize(wxSize(130, 55));
+    m_saveBtn->SetMinSize(wxSize(130, 55));
+    m_deleteBtn->SetMinSize(wxSize(130, 55));
+    m_undoBtn->SetMinSize(wxSize(100, 40));
+
+    // Compass-rose layout: Save top, Delete bottom, Folder1 left, Folder2 right, image center
+    wxFlexGridSizer* grid = new wxFlexGridSizer(3, 3, 0, 0);
+    grid->AddGrowableRow(1);  // image row expands vertically
+    grid->AddGrowableCol(1);  // image column expands horizontally
+
+    // Row 0 — top
+    grid->Add(m_undoBtn,    0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
+    grid->Add(m_saveBtn,    0, wxALL | wxALIGN_CENTER, 8);
+    grid->Add(0, 0);  // empty
+
+    // Row 1 — middle
+    grid->Add(m_folder1Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
+    grid->Add(m_imageBitmap, 0, wxALIGN_CENTER | wxALL, 10);
+    grid->Add(m_folder2Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
+
+    // Row 2 — bottom
+    grid->Add(0, 0);  // empty
+    grid->Add(m_deleteBtn,  0, wxALL | wxALIGN_CENTER, 8);
+    grid->Add(0, 0);  // empty
 
     wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
     vSizer->Add(m_statusLabel, 0, wxALIGN_CENTER | wxALL, 5);
-    vSizer->Add(m_imageBitmap, 1, wxEXPAND | wxALL, 10);
-    vSizer->Add(btnSizer,      0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+    vSizer->Add(grid, 1, wxEXPAND | wxALL, 5);
     SetSizer(vSizer);
 
-    m_folder1Btn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnFolder1, this);
-    m_folder2Btn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnFolder2, this);
-    m_saveBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnSave,    this);
-    m_deleteBtn ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnDelete,  this);
-    m_undoBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnUndo,    this);
+    m_folder1Btn->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnFolder1, this);
+    m_folder2Btn->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnFolder2, this);
+    m_saveBtn   ->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnSave,    this);
+    m_deleteBtn ->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnDelete,  this);
+    m_undoBtn   ->Bind(wxEVT_BUTTON,    &SortPhotosPanel::OnUndo,    this);
     Bind(wxEVT_SIZE, &SortPhotosPanel::OnSize, this);
+    wxGetTopLevelParent(this)->Bind(wxEVT_CHAR_HOOK, &SortPhotosPanel::OnKeyDown, this);
 
     SetButtonsEnabled(false);
+}
+
+SortPhotosPanel::~SortPhotosPanel()
+{
+    wxWindow* tlw = wxGetTopLevelParent(this);
+    if (tlw) tlw->Unbind(wxEVT_CHAR_HOOK, &SortPhotosPanel::OnKeyDown, this);
 }
 
 // ─────────────────────────────────────────────
@@ -173,7 +230,13 @@ void SortPhotosPanel::LoadCurrentImage()
     wxImage img(info->path, wxBITMAP_TYPE_ANY);
     if (img.IsOk()) {
         Layout();
-        wxSize available = m_imageBitmap->GetSize();
+        wxSize panel = GetClientSize();
+        // Available width: panel minus both side button columns + their margins
+        int btnW = m_folder1Btn->GetSize().x + 16;
+        int maxW = panel.x - 2 * btnW;
+        // Available height: 75% of panel height
+        int maxH = (int)(panel.y * 0.75);
+        wxSize available(std::max(maxW, 1), std::max(maxH, 1));
         if (available.x > 1 && available.y > 1) {
             double scaleX = (double)available.x / img.GetWidth();
             double scaleY = (double)available.y / img.GetHeight();
@@ -430,6 +493,16 @@ void SortPhotosPanel::ShowReviewStep()
     wxButton* confirmBtn = new wxButton(this, ID_SORT_STEP_CONFIRM, confirmLabel);
     wxButton* skipBtn    = new wxButton(this, ID_SORT_STEP_SKIP,    skipLabel);
 
+    confirmBtn->SetMinSize(wxSize(170, 50));
+    skipBtn->SetMinSize(wxSize(170, 50));
+
+    wxBitmap icEnter = LoadKeycap("enter.png");
+    if (icEnter.IsOk()) { confirmBtn->SetBitmap(icEnter); confirmBtn->SetBitmapPosition(wxLEFT); }
+    confirmBtn->SetDefault();
+
+    wxBitmap icEsc = LoadKeycap("esc.png");
+    if (icEsc.IsOk()) { skipBtn->SetBitmap(icEsc); skipBtn->SetBitmapPosition(wxLEFT); }
+
     if (m_currentReviewStep == ReviewStep::Delete) {
         confirmBtn->SetBackgroundColour(wxColour(200, 60, 60));
         confirmBtn->SetForegroundColour(*wxWHITE);
@@ -595,9 +668,40 @@ void SortPhotosPanel::SetButtonsEnabled(bool enabled)
 
 void SortPhotosPanel::ShowDoneState()
 {
-    if (m_statusLabel) m_statusLabel->SetLabel("All done!");
-    if (m_imageBitmap) m_imageBitmap->SetBitmap(wxNullBitmap);
-    SetButtonsEnabled(false);
+    m_inReview = true;
+    DestroyChildren();
+    m_imageBitmap = nullptr;
+    m_statusLabel = nullptr;
+    m_folder1Btn = m_folder2Btn = m_saveBtn = m_deleteBtn = m_undoBtn = nullptr;
+
+    Freeze();
+    wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
+    vSizer->AddStretchSpacer();
+
+    wxStaticText* msg = new wxStaticText(this, wxID_ANY, "All Done!\nAll images were saved.",
+                                          wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+    wxFont f = msg->GetFont();
+    f.SetPointSize(f.GetPointSize() + 6);
+    f.SetWeight(wxFONTWEIGHT_BOLD);
+    msg->SetFont(f);
+    vSizer->Add(msg, 0, wxALIGN_CENTER | wxALL, 20);
+
+    vSizer->AddStretchSpacer();
+
+    wxButton* backBtn = new wxButton(this, wxID_ANY, "Back to Menu");
+    backBtn->SetMinSize(wxSize(170, 55));
+    wxBitmap icEnter = LoadKeycap("enter.png");
+    if (icEnter.IsOk()) { backBtn->SetBitmap(icEnter); backBtn->SetBitmapPosition(wxLEFT); }
+    backBtn->SetDefault();
+    vSizer->Add(backBtn, 0, wxALIGN_CENTER | wxBOTTOM, 30);
+
+    backBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+        if (frame) frame->ShowMainMenuPanel();
+    });
+
+    SetSizer(vSizer);
+    Thaw();
     Layout();
 }
 
@@ -608,4 +712,41 @@ void SortPhotosPanel::OnSize(wxSizeEvent& evt)
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
     if (frame && frame->imageRepo.GetCount() > 0 && IsShown() && m_imageBitmap)
         LoadCurrentImage();
+}
+
+void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
+{
+    if (m_inReview) {
+        const int key = evt.GetKeyCode();
+        if (key == WXK_ESCAPE) {
+            wxCommandEvent dummy;
+            OnStepSkip(dummy);
+        } else if (key == WXK_RETURN || key == WXK_NUMPAD_ENTER) {
+            bool isDoneState = m_folder1List.empty() && m_folder2List.empty() && m_deleteList.empty();
+            if (isDoneState) {
+                auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+                if (frame) frame->ShowMainMenuPanel();
+            } else {
+                wxCommandEvent dummy;
+                OnStepConfirm(dummy);
+            }
+        } else {
+            evt.Skip();
+        }
+        return;
+    }
+
+    if (!m_folder1Btn || !m_folder1Btn->IsEnabled()) {
+        evt.Skip();
+        return;
+    }
+    wxCommandEvent dummy;
+    switch (evt.GetKeyCode()) {
+        case WXK_LEFT:  OnFolder1(dummy); break;
+        case WXK_RIGHT: OnFolder2(dummy); break;
+        case WXK_UP:    OnSave(dummy);    break;
+        case WXK_DOWN:  OnDelete(dummy);  break;
+        case 'Z':       OnUndo(dummy);    break;
+        default:        evt.Skip();       break;
+    }
 }

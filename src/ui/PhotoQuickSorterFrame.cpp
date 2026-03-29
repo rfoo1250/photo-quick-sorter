@@ -9,7 +9,7 @@
 #endif
 
 PhotoQuickSorterFrame::PhotoQuickSorterFrame(const wxString &title)
-    : wxFrame(nullptr, wxID_ANY, title, wxDefaultPosition, wxSize(500, 500))
+    : wxFrame(nullptr, wxID_ANY, title, wxDefaultPosition, wxSize(960, 720))
 {
     LOG_DEBUG("PhotoQuickSorterFrame ctor");
 
