@@ -11,10 +11,6 @@ despite the lesser popularity of using C++/CMake/wxWidgets, still fun
 also to actually learn more on github stuff I'm interested in like issues, templates, and more
 
 
-## How to run [DEV]
+## Developer's Guide
 
-idk
-
-CMake Tools on VSCode is currently used to build it.
-
-once built, run `Debug\PhotoQuickSorter.exe`
+Please check [Developer's Guide](./docs/DEVELOPER_GUIDE.md).
