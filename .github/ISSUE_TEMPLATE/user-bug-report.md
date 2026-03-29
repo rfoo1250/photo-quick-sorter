@@ -1,5 +1,5 @@
 ---
-name: Bug report
+name: User Bug report
 about: Found bugs and errors at release
 title: "[BUG]"
 labels: ''
