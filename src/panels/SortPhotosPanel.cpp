@@ -41,8 +41,10 @@ SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
 
 void SortPhotosPanel::BuildSortingUI()
 {
-    m_statusLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
-    m_imageBitmap = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
+    m_imageBitmap    = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
+    m_imageNameLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER | wxST_ELLIPSIZE_END);
+    m_progressLabel  = new wxStaticText(this, wxID_ANY, "0/0", wxDefaultPosition, wxSize(60, -1), wxALIGN_RIGHT);
+    m_progressBar    = new wxGauge(this, wxID_ANY, 1, wxDefaultPosition, wxDefaultSize, wxGA_HORIZONTAL | wxGA_SMOOTH);
 
     m_folder1Btn = new wxButton(this, ID_SORT_FOLDER1, "Folder 1");
     m_folder2Btn = new wxButton(this, ID_SORT_FOLDER2, "Folder 2");
@@ -76,16 +78,24 @@ void SortPhotosPanel::BuildSortingUI()
     grid->Add(m_saveBtn,    0, wxALL | wxALIGN_CENTER, 8);
     grid->Add(0, 0);
 
+    wxBoxSizer* imageCell = new wxBoxSizer(wxVERTICAL);
+    imageCell->Add(m_imageNameLabel, 0, wxALIGN_CENTER | wxBOTTOM, 4);
+    imageCell->Add(m_imageBitmap,    0, wxALIGN_CENTER);
+
     grid->Add(m_folder1Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
-    grid->Add(m_imageBitmap, 0, wxALIGN_CENTER | wxALL, 10);
+    grid->Add(imageCell,    1, wxEXPAND | wxALIGN_CENTER, 10);
     grid->Add(m_folder2Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
 
     grid->Add(0, 0);
     grid->Add(m_deleteBtn,  0, wxALL | wxALIGN_CENTER, 8);
     grid->Add(0, 0);
 
+    wxBoxSizer* progressRow = new wxBoxSizer(wxHORIZONTAL);
+    progressRow->Add(m_progressLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+    progressRow->Add(m_progressBar,   1, wxALIGN_CENTER_VERTICAL);
+
     wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
-    vSizer->Add(m_statusLabel, 0, wxALIGN_CENTER | wxALL, 5);
+    vSizer->Add(progressRow, 0, wxEXPAND | wxALL, 8);
     vSizer->Add(grid, 1, wxEXPAND | wxALL, 5);
     SetSizer(vSizer);
 
@@ -230,11 +240,11 @@ void SortPhotosPanel::LoadCurrentImage()
         return;
     }
 
-    m_statusLabel->SetLabel(wxString::Format("Image %zu of %zu  -  %s   [%zu recorded]",
-        m_currentIndex + 1,
-        frame->imageRepo.GetCount(),
-        wxFileName(info->path).GetFullName(),
-        m_actionHistory.size()));
+    size_t total = frame->imageRepo.GetCount();
+    m_progressBar->SetRange((int)total);
+    m_progressBar->SetValue((int)m_currentIndex);
+    m_progressLabel->SetLabel(wxString::Format("%zu/%zu", m_currentIndex, total));
+    m_imageNameLabel->SetLabel(wxFileName(info->path).GetFullName());
 
     wxImage img(info->path, wxBITMAP_TYPE_ANY);
     if (img.IsOk()) {
@@ -381,8 +391,10 @@ void SortPhotosPanel::OnAllImagesActedUpon()
 
     // Destroy sorting UI and null all sorting-UI pointers
     DestroyChildren();
-    m_imageBitmap = nullptr;
-    m_statusLabel = nullptr;
+    m_imageBitmap    = nullptr;
+    m_progressBar    = nullptr;
+    m_progressLabel  = nullptr;
+    m_imageNameLabel = nullptr;
     m_folder1Btn  = nullptr;
     m_folder2Btn  = nullptr;
     m_saveBtn     = nullptr;
@@ -680,8 +692,10 @@ void SortPhotosPanel::ShowDoneState()
 {
     m_inReview = true;
     DestroyChildren();
-    m_imageBitmap = nullptr;
-    m_statusLabel = nullptr;
+    m_imageBitmap    = nullptr;
+    m_progressBar    = nullptr;
+    m_progressLabel  = nullptr;
+    m_imageNameLabel = nullptr;
     m_folder1Btn = m_folder2Btn = m_saveBtn = m_deleteBtn = m_undoBtn = nullptr;
 
     Freeze();
