@@ -15,11 +15,13 @@ class PhotoQuickSorterFrame;
 class MainMenuPanel : public wxPanel {
 public:
     explicit MainMenuPanel(wxWindow* parent);
+    // Re-scan and redisplay the preview using the current base folder text value.
+    void RefreshPreview();
 private:
     void OnBrowseFolder(wxCommandEvent& event);
     void OnStartSorting(wxCommandEvent& event);
     void OnBaseFolderFocusLost(wxFocusEvent& event);
-    void RefreshPreview(const wxString& folderPath);
+    void RefreshPreview(const wxString& folderPath); // internal
     wxTextCtrl*    m_baseFolderText = nullptr;
     wxTextCtrl*    m_folder1Text    = nullptr;
     wxTextCtrl*    m_folder2Text    = nullptr;

@@ -187,11 +187,16 @@ void MainMenuPanel::OnBrowseFolder(wxCommandEvent &event)
     }
 }
 
+void MainMenuPanel::RefreshPreview()
+{
+    if (!m_baseFolderText) return;
+    RefreshPreview(m_baseFolderText->GetValue().Trim(true).Trim(false));
+}
+
 void MainMenuPanel::OnBaseFolderFocusLost(wxFocusEvent& event)
 {
     event.Skip(); // always skip focus events
-    wxString path = m_baseFolderText->GetValue().Trim(true).Trim(false);
-    RefreshPreview(path);
+    RefreshPreview();
 }
 
 void MainMenuPanel::RefreshPreview(const wxString& folderPath)
@@ -276,14 +281,30 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
         return;
     }
 
-    // 3a) Conflict check: folder1 and folder2 must not be the same location
+    // 3a) Duplicate path check: warn for any pair that shares the same location
     const wxString& f1 = frame->folderLocations.folder1;
     const wxString& f2 = frame->folderLocations.folder2;
-    if (!f1.IsEmpty() && !f2.IsEmpty() && f1 == f2) {
-        ShowIconDialog(this,
-            "Conflicting Folders",
-            "Folder 1 and Folder 2 cannot be the same location.\nPlease choose different paths.");
-        return;
+    {
+        wxArrayString conflicts;
+        if (!baseFolder.IsEmpty() && !f1.IsEmpty() && baseFolder == f1)
+            conflicts.Add("Base Folder and Folder 1 are the same location.");
+        if (!baseFolder.IsEmpty() && !f2.IsEmpty() && baseFolder == f2)
+            conflicts.Add("Base Folder and Folder 2 are the same location.");
+        if (!f1.IsEmpty() && !f2.IsEmpty() && f1 == f2)
+            conflicts.Add("Folder 1 and Folder 2 are the same location.");
+
+        if (!conflicts.IsEmpty()) {
+            wxString details;
+            for (const auto& line : conflicts)
+                details += "- " + line + "\n";
+            bool proceed = ShowIconDialog(this,
+                "Duplicate Folder Paths",
+                wxString::Format(
+                    "%s\nImages may overwrite each other or be sorted into their source folder.\n\nContinue anyway?",
+                    details),
+                true);
+            if (!proceed) return;
+        }
     }
 
     // 3b) Empty destination warning: ask before proceeding

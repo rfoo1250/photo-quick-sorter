@@ -50,7 +50,10 @@ PhotoQuickSorterFrame::PhotoQuickSorterFrame(const wxString &title)
 void PhotoQuickSorterFrame::ShowMainMenuPanel()
 {
     if (m_sortPhotosPanel) m_sortPhotosPanel->Hide();
-    if (m_mainMenuPanel) m_mainMenuPanel->Show();
+    if (m_mainMenuPanel) {
+        m_mainMenuPanel->Show();
+        m_mainMenuPanel->RefreshPreview();
+    }
     Layout();
 }
 

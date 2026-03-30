@@ -444,19 +444,19 @@ void SortPhotosPanel::ShowReviewStep()
     switch (m_currentReviewStep) {
         case ReviewStep::Folder1:
             list         = &m_folder1List;
-            titleText    = wxString::Format("-> Folder 1  —  %zu image(s) to move", m_folder1List.size());
+            titleText    = wxString::Format("-> Folder 1 - %zu image(s) to move", m_folder1List.size());
             confirmLabel = "Confirm Move";
             skipLabel    = "Skip (keep in base folder)";
             break;
         case ReviewStep::Folder2:
             list         = &m_folder2List;
-            titleText    = wxString::Format("-> Folder 2  —  %zu image(s) to move", m_folder2List.size());
+            titleText    = wxString::Format("-> Folder 2 - %zu image(s) to move", m_folder2List.size());
             confirmLabel = "Confirm Move";
             skipLabel    = "Skip (keep in base folder)";
             break;
         case ReviewStep::Delete:
             list         = &m_deleteList;
-            titleText    = wxString::Format("Delete  —  %zu image(s)", m_deleteList.size());
+            titleText    = wxString::Format("Delete - %zu image(s)", m_deleteList.size());
             confirmLabel = "Confirm Delete";
             skipLabel    = "Keep All";
             break;
