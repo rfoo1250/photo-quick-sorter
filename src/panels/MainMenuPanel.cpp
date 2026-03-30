@@ -136,7 +136,6 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     toSortPanelBtn->Bind(wxEVT_BUTTON, &MainMenuPanel::OnStartSorting, this);
     m_baseFolderText->Bind(wxEVT_KILL_FOCUS, &MainMenuPanel::OnBaseFolderFocusLost, this);
 
-    m_toast = new Toast(wxGetTopLevelParent(this));
 }
 
 void MainMenuPanel::OnBrowseFolder(wxCommandEvent &event)
@@ -230,14 +229,8 @@ void MainMenuPanel::RefreshPreview(const wxString& folderPath)
         return;
     }
 
-    if (m_toast)
-        m_toast->ShowMessage(wxString::Format("Loading %zu image(s)...", files.size()));
-
     m_thumbnailGrid->SetImages(files);
     Layout();
-
-    if (m_toast)
-        m_toast->Dismiss();
 }
 
 void MainMenuPanel::OnStartSorting(wxCommandEvent &event)

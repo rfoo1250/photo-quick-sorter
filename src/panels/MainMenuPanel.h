@@ -1,7 +1,6 @@
 #pragma once
 #include <wx/wx.h>
 #include "ui/ThumbnailGrid.h"
-#include "ui/Toast.h"
 
 enum {
     ID_BROWSE_BASE = wxID_HIGHEST + 1,
@@ -26,5 +25,4 @@ private:
     wxTextCtrl*    m_folder1Text    = nullptr;
     wxTextCtrl*    m_folder2Text    = nullptr;
     ThumbnailGrid* m_thumbnailGrid  = nullptr;
-    Toast*         m_toast          = nullptr;
 };
