@@ -1,6 +1,6 @@
 #pragma once
 #include <wx/wx.h>
-#include <wx/scrolwin.h>
+#include "ui/ThumbnailGrid.h"
 #include "ui/Toast.h"
 
 enum {
@@ -19,12 +19,10 @@ private:
     void OnBrowseFolder(wxCommandEvent& event);
     void OnStartSorting(wxCommandEvent& event);
     void OnBaseFolderFocusLost(wxFocusEvent& event);
-    void OnSize(wxSizeEvent& event);
     void RefreshPreview(const wxString& folderPath);
-    wxTextCtrl*       m_baseFolderText  = nullptr;
-    wxTextCtrl*       m_folder1Text     = nullptr;
-    wxTextCtrl*       m_folder2Text     = nullptr;
-    wxScrolledWindow* m_previewScroll   = nullptr;
-    wxString          m_previewFolder;
-    Toast*            m_toast           = nullptr;
+    wxTextCtrl*    m_baseFolderText = nullptr;
+    wxTextCtrl*    m_folder1Text    = nullptr;
+    wxTextCtrl*    m_folder2Text    = nullptr;
+    ThumbnailGrid* m_thumbnailGrid  = nullptr;
+    Toast*         m_toast          = nullptr;
 };

@@ -1,5 +1,6 @@
 #include "panels/SortPhotosPanel.h"
 #include "ui/PhotoQuickSorterFrame.h"
+#include "ui/ThumbnailGrid.h"
 #include "utils/logging.h"
 #include <wx/filename.h>
 #include <wx/filefn.h>
@@ -470,45 +471,10 @@ void SortPhotosPanel::ShowReviewStep()
                                            wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
     vSizer->Add(title, 0, wxALIGN_CENTER | wxALL, 8);
 
-    // Scrollable thumbnail grid
-    wxScrolledWindow* scroll = new wxScrolledWindow(this, wxID_ANY);
-    scroll->SetScrollRate(0, 20);
-
-    wxWrapSizer* wrapSizer = new wxWrapSizer(wxHORIZONTAL);
-
-    for (const wxString& imgPath : *list) {
-        wxImage img;
-        if (wxFileExists(imgPath))
-            img.LoadFile(imgPath, wxBITMAP_TYPE_ANY);
-
-        wxBitmap bmp;
-        if (img.IsOk()) {
-            double scaleX = 120.0 / img.GetWidth();
-            double scaleY = 120.0 / img.GetHeight();
-            double scale  = std::min(scaleX, scaleY);
-            img = img.Scale((int)(img.GetWidth() * scale),
-                            (int)(img.GetHeight() * scale),
-                            wxIMAGE_QUALITY_NORMAL);
-            bmp = wxBitmap(img);
-        }
-
-        wxStaticBitmap* thumb = new wxStaticBitmap(scroll, wxID_ANY, bmp);
-        thumb->SetMinSize(wxSize(120, 120));
-
-        wxString fname = wxFileName(imgPath).GetFullName();
-        if (fname.length() > 16) fname = fname.Left(14) + "..";
-        wxStaticText* lbl = new wxStaticText(scroll, wxID_ANY, fname,
-                                              wxDefaultPosition, wxSize(128, -1),
-                                              wxALIGN_CENTER | wxST_ELLIPSIZE_END);
-
-        wxBoxSizer* thumbBox = new wxBoxSizer(wxVERTICAL);
-        thumbBox->Add(thumb, 0, wxALIGN_CENTER | wxALL, 4);
-        thumbBox->Add(lbl,   0, wxALIGN_CENTER);
-        wrapSizer->Add(thumbBox, 0, wxALL, 4);
-    }
-
-    scroll->SetSizer(wrapSizer);
-    vSizer->Add(scroll, 1, wxEXPAND | wxALL, 6);
+    // Scrollable thumbnail grid (same component as MainMenu preview)
+    ThumbnailGrid* thumbGrid = new ThumbnailGrid(this);
+    thumbGrid->SetImages(std::vector<wxString>(list->begin(), list->end()));
+    vSizer->Add(thumbGrid, 1, wxEXPAND | wxALL, 6);
 
     // Buttons
     wxButton* confirmBtn = new wxButton(this, ID_SORT_STEP_CONFIRM, confirmLabel);

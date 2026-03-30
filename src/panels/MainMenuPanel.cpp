@@ -6,7 +6,6 @@
 #include <wx/filename.h>
 #include <wx/dir.h>
 #include <wx/filefn.h>
-#include <wx/scrolwin.h>
 #include <algorithm>
 
 namespace {
@@ -128,16 +127,8 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     // }
 
     // --- Base folder preview ---
-    m_previewScroll = new wxScrolledWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
-    m_previewScroll->SetScrollRate(0, 20);
-    // Initial hint
-    wxStaticText* hint = new wxStaticText(m_previewScroll, wxID_ANY,
-        "Select a Base Folder to preview images.", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
-    wxBoxSizer* hintSizer = new wxBoxSizer(wxVERTICAL);
-    hintSizer->Add(hint, 0, wxALIGN_CENTER | wxALL, 20);
-    m_previewScroll->SetSizer(hintSizer);
-
-    vbox->Add(m_previewScroll, 1, wxEXPAND | wxALL, 5);
+    m_thumbnailGrid = new ThumbnailGrid(this, "Select a Base Folder to preview images.");
+    vbox->Add(m_thumbnailGrid, 1, wxEXPAND | wxALL, 5);
     vbox->Add(toSortPanelBtn, 0, wxEXPAND | wxALL, 8);
     SetSizer(vbox);
 
@@ -147,7 +138,6 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     folder2NameBrowseBtn->Bind(wxEVT_BUTTON, &MainMenuPanel::OnBrowseFolder, this);
     toSortPanelBtn->Bind(wxEVT_BUTTON, &MainMenuPanel::OnStartSorting, this);
     m_baseFolderText->Bind(wxEVT_KILL_FOCUS, &MainMenuPanel::OnBaseFolderFocusLost, this);
-    Bind(wxEVT_SIZE, &MainMenuPanel::OnSize, this);
 
     m_toast = new Toast(wxGetTopLevelParent(this));
 }
@@ -204,102 +194,42 @@ void MainMenuPanel::OnBaseFolderFocusLost(wxFocusEvent& event)
     RefreshPreview(path);
 }
 
-void MainMenuPanel::OnSize(wxSizeEvent& event)
-{
-    event.Skip();
-    if (!m_previewFolder.IsEmpty())
-        RefreshPreview(m_previewFolder);
-}
-
 void MainMenuPanel::RefreshPreview(const wxString& folderPath)
 {
-    if (!m_previewScroll) return;
-
-    m_previewFolder = folderPath;
-    m_previewScroll->Freeze();
-    m_previewScroll->DestroyChildren();
-
-    auto showHint = [&](const wxString& msg) {
-        wxStaticText* lbl = new wxStaticText(m_previewScroll, wxID_ANY, msg,
-                                             wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
-        wxBoxSizer* s = new wxBoxSizer(wxVERTICAL);
-        s->Add(lbl, 0, wxALIGN_CENTER | wxALL, 20);
-        m_previewScroll->SetSizer(s);
-        m_previewScroll->FitInside();
-        m_previewScroll->Thaw();
-        Layout();
-    };
+    if (!m_thumbnailGrid) return;
 
     if (folderPath.IsEmpty() || !wxDir::Exists(folderPath)) {
-        showHint("Select a Base Folder to preview images.");
+        m_thumbnailGrid->SetImages({});
+        Layout();
         return;
     }
 
     // Collect image files (same extensions as ImageRepository)
     const wxString exts[] = { "*.jpg", "*.jpeg", "*.png", "*.webp", "*.heic" };
-    wxArrayString files;
+    std::vector<wxString> files;
     wxDir dir(folderPath);
     if (dir.IsOpened()) {
         for (const auto& ext : exts) {
             wxString fn;
             bool has = dir.GetFirst(&fn, ext, wxDIR_FILES);
             while (has) {
-                files.Add(folderPath + wxFILE_SEP_PATH + fn);
+                files.push_back(folderPath + wxFILE_SEP_PATH + fn);
                 has = dir.GetNext(&fn);
             }
         }
     }
-    files.Sort();
+    std::sort(files.begin(), files.end());
 
-    if (files.IsEmpty()) {
-        showHint("No supported images found in this folder.");
+    if (files.empty()) {
+        m_thumbnailGrid->SetImages({});
+        Layout();
         return;
     }
 
     if (m_toast)
-        m_toast->ShowMessage(wxString::Format("Loading %zu image(s)...", files.GetCount()));
+        m_toast->ShowMessage(wxString::Format("Loading %zu image(s)...", files.size()));
 
-    // Thumb size: fill 3 columns across ~92% of the scroll area width
-    const int padding = 12; // gap between cells (each side)
-    int scrollW = m_previewScroll->GetClientSize().x;
-    if (scrollW < 60) scrollW = GetClientSize().x; // fallback before first layout
-    int thumbSize = (int)((scrollW * 0.92 - padding * 4) / 3);
-    if (thumbSize < 60) thumbSize = 60;
-
-    // 3-column grid
-    wxFlexGridSizer* grid = new wxFlexGridSizer(0, 3, padding, padding);
-
-    for (const wxString& path : files) {
-        wxImage img;
-        img.LoadFile(path, wxBITMAP_TYPE_ANY);
-
-        wxBitmap bmp;
-        if (img.IsOk()) {
-            double sx = (double)thumbSize / img.GetWidth();
-            double sy = (double)thumbSize / img.GetHeight();
-            double s  = std::min(sx, sy);
-            img = img.Scale((int)(img.GetWidth() * s), (int)(img.GetHeight() * s), wxIMAGE_QUALITY_NORMAL);
-            bmp = wxBitmap(img);
-        }
-
-        wxStaticBitmap* thumb = new wxStaticBitmap(m_previewScroll, wxID_ANY, bmp);
-        thumb->SetMinSize(wxSize(thumbSize, thumbSize));
-
-        wxStaticText* lbl = new wxStaticText(m_previewScroll, wxID_ANY,
-            wxFileName(path).GetFullName(),
-            wxDefaultPosition, wxSize(thumbSize, -1),
-            wxALIGN_CENTER | wxST_ELLIPSIZE_END);
-
-        wxBoxSizer* cell = new wxBoxSizer(wxVERTICAL);
-        cell->Add(thumb, 0, wxALIGN_CENTER | wxBOTTOM, 3);
-        cell->Add(lbl,   0, wxALIGN_CENTER);
-
-        grid->Add(cell, 0, wxALIGN_TOP | wxALIGN_CENTER_HORIZONTAL | wxALL, 4);
-    }
-
-    m_previewScroll->SetSizer(grid);
-    m_previewScroll->FitInside();
-    m_previewScroll->Thaw();
+    m_thumbnailGrid->SetImages(files);
     Layout();
 
     if (m_toast)
