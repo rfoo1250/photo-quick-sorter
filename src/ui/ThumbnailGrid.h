@@ -18,6 +18,9 @@ public:
     // Replace displayed images. Empty vector shows the empty hint.
     void SetImages(const std::vector<wxString>& paths);
 
+    // Change the text shown when images list is empty.
+    void SetEmptyHint(const wxString& hint);
+
 private:
     void Rebuild();
     void OnSize(wxSizeEvent& evt);

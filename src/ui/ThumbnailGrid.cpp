@@ -21,6 +21,13 @@ void ThumbnailGrid::SetImages(const std::vector<wxString>& paths)
     Rebuild();
 }
 
+void ThumbnailGrid::SetEmptyHint(const wxString& hint)
+{
+    m_emptyHint = hint;
+    if (m_paths.empty())
+        Rebuild();
+}
+
 void ThumbnailGrid::OnSize(wxSizeEvent& evt)
 {
     evt.Skip();

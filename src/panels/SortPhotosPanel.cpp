@@ -65,11 +65,6 @@ void SortPhotosPanel::BuildSortingUI()
     if (icDown.IsOk())  { m_deleteBtn->SetBitmap(icDown);   m_deleteBtn->SetBitmapPosition(wxBOTTOM); }
     if (icZ.IsOk())     { m_undoBtn->SetBitmap(icZ);        m_undoBtn->SetBitmapPosition(wxLEFT);     }
 
-    m_folder1Btn->SetMinSize(wxSize(130, 55));
-    m_folder2Btn->SetMinSize(wxSize(130, 55));
-    m_saveBtn->SetMinSize(wxSize(130, 55));
-    m_deleteBtn->SetMinSize(wxSize(130, 55));
-    m_undoBtn->SetMinSize(wxSize(100, 40));
 
     wxFlexGridSizer* grid = new wxFlexGridSizer(3, 3, 0, 0);
     grid->AddGrowableRow(1);
@@ -212,12 +207,27 @@ void SortPhotosPanel::CheckForPendingSession()
         m_folder1List = std::move(tmp1);
         m_folder2List = std::move(tmp2);
         m_deleteList  = std::move(tmpd);
-        // Rebuild a flat action history (interleaving lost, but only lists matter for review)
+        // Rebuild action history (interleaving lost, but only the lists matter for review)
         for (const auto& p : m_folder1List) m_actionHistory.push_back({p, SortAction::MoveToFolder1});
         for (const auto& p : m_folder2List) m_actionHistory.push_back({p, SortAction::MoveToFolder2});
         for (const auto& p : m_deleteList)  m_actionHistory.push_back({p, SortAction::Delete});
-        LOG_INFO("Resumed previous session: %zu F1, %zu F2, %zu delete",
-                 m_folder1List.size(), m_folder2List.size(), m_deleteList.size());
+
+        // Remove already-acted-upon images from imageRepo so sorting resumes
+        // from the first unprocessed image (m_currentIndex stays 0 after RefreshData reset).
+        // Collect indices descending so RemoveAt doesn't invalidate later indices.
+        std::vector<size_t> toRemove;
+        for (const auto& action : m_actionHistory) {
+            ptrdiff_t idx = frame->imageRepo.FindByPath(action.imagePath);
+            if (idx >= 0) toRemove.push_back(static_cast<size_t>(idx));
+        }
+        std::sort(toRemove.begin(), toRemove.end(), std::greater<size_t>());
+        toRemove.erase(std::unique(toRemove.begin(), toRemove.end()), toRemove.end());
+        for (size_t idx : toRemove)
+            frame->imageRepo.RemoveAt(idx);
+
+        LOG_INFO("Resumed previous session: %zu F1, %zu F2, %zu delete, %zu image(s) remaining",
+                 m_folder1List.size(), m_folder2List.size(), m_deleteList.size(),
+                 frame->imageRepo.GetCount());
     } else {
         if (wxFileExists(f1txt))  wxRemoveFile(f1txt);
         if (wxFileExists(f2txt))  wxRemoveFile(f2txt);
@@ -480,8 +490,6 @@ void SortPhotosPanel::ShowReviewStep()
     wxButton* confirmBtn = new wxButton(this, ID_SORT_STEP_CONFIRM, confirmLabel);
     wxButton* skipBtn    = new wxButton(this, ID_SORT_STEP_SKIP,    skipLabel);
 
-    confirmBtn->SetMinSize(wxSize(170, 50));
-    skipBtn->SetMinSize(wxSize(170, 50));
 
     wxBitmap icEnter = LoadKeycap("enter.png");
     if (icEnter.IsOk()) { confirmBtn->SetBitmap(icEnter); confirmBtn->SetBitmapPosition(wxLEFT); }
@@ -679,7 +687,6 @@ void SortPhotosPanel::ShowDoneState()
     vSizer->AddStretchSpacer();
 
     wxButton* backBtn = new wxButton(this, wxID_ANY, "Back to Menu");
-    backBtn->SetMinSize(wxSize(170, 55));
     wxBitmap icEnter = LoadKeycap("enter.png");
     if (icEnter.IsOk()) { backBtn->SetBitmap(icEnter); backBtn->SetBitmapPosition(wxLEFT); }
     backBtn->SetDefault();

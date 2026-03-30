@@ -40,15 +40,12 @@ bool ShowIconDialog(wxWindow* parent, const wxString& title, const wxString& msg
         // wxDialog only auto-closes for wxID_OK (affirmative) and wxID_CANCEL (escape)
         wxButton* yesBtn = new wxButton(&dlg, wxID_OK,     "Yes");
         wxButton* noBtn  = new wxButton(&dlg, wxID_CANCEL, "No");
-        yesBtn->SetMinSize(wxSize(120, 45));
-        noBtn->SetMinSize(wxSize(120, 45));
         if (icEnter.IsOk()) { yesBtn->SetBitmap(icEnter); yesBtn->SetBitmapPosition(wxLEFT); }
         yesBtn->SetDefault();
         btnRow->Add(yesBtn, 0, wxALL, 8);
         btnRow->Add(noBtn,  0, wxALL, 8);
     } else {
         wxButton* okBtn = new wxButton(&dlg, wxID_OK, "OK");
-        okBtn->SetMinSize(wxSize(120, 45));
         if (icEnter.IsOk()) { okBtn->SetBitmap(icEnter); okBtn->SetBitmapPosition(wxLEFT); }
         okBtn->SetDefault();
         btnRow->Add(okBtn, 0, wxALL, 8);
@@ -204,6 +201,7 @@ void MainMenuPanel::RefreshPreview(const wxString& folderPath)
     if (!m_thumbnailGrid) return;
 
     if (folderPath.IsEmpty() || !wxDir::Exists(folderPath)) {
+        m_thumbnailGrid->SetEmptyHint("Select a Base Folder to preview images.");
         m_thumbnailGrid->SetImages({});
         Layout();
         return;
@@ -226,6 +224,7 @@ void MainMenuPanel::RefreshPreview(const wxString& folderPath)
     std::sort(files.begin(), files.end());
 
     if (files.empty()) {
+        m_thumbnailGrid->SetEmptyHint("This folder is empty - no supported images found.");
         m_thumbnailGrid->SetImages({});
         Layout();
         return;
