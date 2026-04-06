@@ -12,7 +12,7 @@ set(wxWidgets_LIB_DIR "C:/Libraries/wxWidgets-3.3.1/lib/vc_x64_lib")
 set(wxWidgets_USE_STATIC ON)
 
 # Prefer find_package to locate wxWidgets
-find_package(wxWidgets REQUIRED COMPONENTS core base)
+find_package(wxWidgets REQUIRED COMPONENTS core base media)
 
 # include the helper file if present (older style)
 if (DEFINED wxWidgets_USE_FILE)
@@ -33,6 +33,7 @@ set(SOURCES
 )
 set(HEADERS
     src/utils/config.h
+    src/utils/MediaUtils.h
     src/app/PhotoQuickSorterApp.h
     src/ui/PhotoQuickSorterFrame.h
     src/utils/logging.h

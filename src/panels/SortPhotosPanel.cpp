@@ -2,12 +2,88 @@
 #include "ui/PhotoQuickSorterFrame.h"
 #include "ui/ThumbnailGrid.h"
 #include "utils/logging.h"
+#include "utils/MediaUtils.h"
 #include <wx/filename.h>
 #include <wx/filefn.h>
 #include <wx/dir.h>
 #include <wx/textfile.h>
 #include <wx/stdpaths.h>
 #include <algorithm>
+
+#ifdef __WXMSW__
+#include <shobjidl.h>
+#endif
+
+// ─────────────────────────────────────────────
+// Video thumbnail helper (Windows Shell cache)
+// ─────────────────────────────────────────────
+
+#ifdef __WXMSW__
+// Called on the main thread — COM is initialised by wxWidgets (OleInitialize).
+// Uses GetDIBits with an explicit top-down, 32-bit format so we get a
+// normalised left→right, top→bottom BGRA buffer regardless of how the Shell
+// chose to store the HBITMAP internally (stride, orientation, DDB vs DIB).
+static wxBitmap GetVideoThumbnailBitmap(const wxString& path, int size)
+{
+    IShellItemImageFactory* pFactory = nullptr;
+    if (FAILED(SHCreateItemFromParsingName(path.wc_str(), nullptr,
+                                            IID_PPV_ARGS(&pFactory))))
+        return wxNullBitmap;
+
+    SIZE sz = { size, size };
+    HBITMAP hBmp = nullptr;
+    HRESULT hr = pFactory->GetImage(sz, SIIGBF_BIGGERSIZEOK, &hBmp);
+    pFactory->Release();
+    if (FAILED(hr) || !hBmp) return wxNullBitmap;
+
+    // Query dimensions only (works for both DDB and DIB section).
+    BITMAP bm = {};
+    if (!GetObject(hBmp, sizeof(BITMAP), &bm) || bm.bmWidth <= 0 || bm.bmHeight == 0) {
+        DeleteObject(hBmp);
+        return wxNullBitmap;
+    }
+    int w = bm.bmWidth, h = abs(bm.bmHeight);
+
+    // Ask GetDIBits for a top-down (biHeight < 0), 32-bit BGRA buffer.
+    // This normalises any internal orientation/stride the Shell may have used.
+    BITMAPINFOHEADER bih = {};
+    bih.biSize        = sizeof(BITMAPINFOHEADER);
+    bih.biWidth       = w;
+    bih.biHeight      = -h; // negative = top-down output
+    bih.biPlanes      = 1;
+    bih.biBitCount    = 32;
+    bih.biCompression = BI_RGB;
+
+    std::vector<BYTE> pixels(w * h * 4);
+    HDC hdc = ::GetDC(nullptr);
+    int rows = ::GetDIBits(hdc, hBmp, 0, h, pixels.data(),
+                            reinterpret_cast<BITMAPINFO*>(&bih), DIB_RGB_COLORS);
+    ::ReleaseDC(nullptr, hdc);
+    ::DeleteObject(hBmp);
+
+    if (rows <= 0) return wxNullBitmap;
+
+    // Convert BGRA → RGB for wxImage (stride is exactly w*4 because we asked for it).
+    wxImage img(w, h, false);
+    unsigned char* rgb = img.GetData();
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            int si = (y * w + x) * 4, di = y * w + x;
+            rgb[di*3+0] = pixels[si+2]; // R
+            rgb[di*3+1] = pixels[si+1]; // G
+            rgb[di*3+2] = pixels[si+0]; // B
+        }
+    }
+
+    if (w > size || h > size) {
+        double s = std::min((double)size / w, (double)size / h);
+        img = img.Scale(std::max(1, (int)(w * s)),
+                        std::max(1, (int)(h * s)),
+                        wxIMAGE_QUALITY_NORMAL);
+    }
+    return wxBitmap(img);
+}
+#endif // __WXMSW__
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -42,7 +118,17 @@ SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
 
 void SortPhotosPanel::BuildSortingUI()
 {
-    m_imageBitmap    = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
+    m_imageBitmap = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
+
+    m_openVideoBtn = new wxButton(this, wxID_ANY, "Open in Player");
+    m_openVideoBtn->Hide();
+    m_openVideoBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+        if (!frame) return;
+        const ImageInfo* info = frame->imageRepo.GetAt(m_currentIndex);
+        if (info) wxLaunchDefaultApplication(info->path);
+    });
+
     m_imageNameLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER | wxST_ELLIPSIZE_END);
     m_progressLabel  = new wxStaticText(this, wxID_ANY, "0/0", wxDefaultPosition, wxSize(60, -1), wxALIGN_RIGHT);
     m_progressBar    = new wxGauge(this, wxID_ANY, 1, wxDefaultPosition, wxDefaultSize, wxGA_HORIZONTAL | wxGA_SMOOTH);
@@ -77,6 +163,7 @@ void SortPhotosPanel::BuildSortingUI()
     wxBoxSizer* imageCell = new wxBoxSizer(wxVERTICAL);
     imageCell->Add(m_imageNameLabel, 0, wxALIGN_CENTER | wxBOTTOM, 4);
     imageCell->Add(m_imageBitmap,    0, wxALIGN_CENTER);
+    imageCell->Add(m_openVideoBtn,   0, wxALIGN_CENTER | wxTOP, 8);
 
     grid->Add(m_folder1Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(imageCell,    1, wxEXPAND, 10);
@@ -135,6 +222,7 @@ void SortPhotosPanel::RefreshData()
 
     // Reset session state
     m_currentIndex    = 0;
+    m_currentIsVideo  = false;
     m_inReview        = false;
     m_folder1Shown    = false;
     m_folder2Shown    = false;
@@ -257,29 +345,68 @@ void SortPhotosPanel::LoadCurrentImage()
     m_progressLabel->SetLabel(wxString::Format("%zu/%zu", m_currentIndex, total));
     m_imageNameLabel->SetLabel(wxFileName(info->path).GetFullName());
 
-    wxImage img(info->path, wxBITMAP_TYPE_ANY);
-    if (img.IsOk()) {
+    m_currentIsVideo = MediaUtils::IsVideoFile(info->path);
+    m_imageBitmap->Show();
+
+    if (m_currentIsVideo) {
+        // ── Video: show shell thumbnail + "Open in Player" button ────────────
+        m_openVideoBtn->Show();
         Layout();
+
         wxSize panel = GetClientSize();
-        // Available width: panel minus both side button columns + their margins
         int btnW = m_folder1Btn->GetSize().x + 16;
-        int maxW = panel.x - 2 * btnW;
-        // Available height: 75% of panel height
-        int maxH = (int)(panel.y * 0.75);
-        wxSize available(std::max(maxW, 1), std::max(maxH, 1));
-        if (available.x > 1 && available.y > 1) {
-            double scaleX = (double)available.x / img.GetWidth();
-            double scaleY = (double)available.y / img.GetHeight();
+        int maxW = std::max(1, panel.x - 2 * btnW);
+        int maxH = std::max(1, (int)(panel.y * 0.70)); // leave room for the button below
+
+        // Request at the larger dimension so the shell gives us enough pixels,
+        // then scale to fit within maxW x maxH (same aspect-ratio logic as images).
+        int requestSize = std::max(64, std::max(maxW, maxH));
+
+        wxBitmap thumb;
+#ifdef __WXMSW__
+        thumb = GetVideoThumbnailBitmap(info->path, requestSize);
+#endif
+        if (thumb.IsOk()) {
+            wxImage img = thumb.ConvertToImage();
+            double scaleX = (double)maxW / img.GetWidth();
+            double scaleY = (double)maxH / img.GetHeight();
             double scale  = std::min(scaleX, scaleY);
             if (scale < 1.0)
-                img = img.Scale((int)(img.GetWidth() * scale),
-                                (int)(img.GetHeight() * scale),
+                img = img.Scale(std::max(1, (int)(img.GetWidth()  * scale)),
+                                std::max(1, (int)(img.GetHeight() * scale)),
                                 wxIMAGE_QUALITY_HIGH);
+            m_imageBitmap->SetBitmap(wxBitmap(img));
+        } else {
+            m_imageBitmap->SetBitmap(wxNullBitmap);
         }
-        m_imageBitmap->SetBitmap(wxBitmap(img));
     } else {
-        m_imageBitmap->SetBitmap(wxNullBitmap);
-        LOG_WARN("Could not load image: %s", info->path);
+        // ── Image: scale and display with wxStaticBitmap ─────────────────────
+        m_openVideoBtn->Hide();
+
+        wxImage img(info->path, wxBITMAP_TYPE_ANY);
+        if (img.IsOk()) {
+            Layout();
+            wxSize panel = GetClientSize();
+            // Available width: panel minus both side button columns + their margins
+            int btnW = m_folder1Btn->GetSize().x + 16;
+            int maxW = panel.x - 2 * btnW;
+            // Available height: 75% of panel height
+            int maxH = (int)(panel.y * 0.75);
+            wxSize available(std::max(maxW, 1), std::max(maxH, 1));
+            if (available.x > 1 && available.y > 1) {
+                double scaleX = (double)available.x / img.GetWidth();
+                double scaleY = (double)available.y / img.GetHeight();
+                double scale  = std::min(scaleX, scaleY);
+                if (scale < 1.0)
+                    img = img.Scale((int)(img.GetWidth() * scale),
+                                    (int)(img.GetHeight() * scale),
+                                    wxIMAGE_QUALITY_HIGH);
+            }
+            m_imageBitmap->SetBitmap(wxBitmap(img));
+        } else {
+            m_imageBitmap->SetBitmap(wxNullBitmap);
+            LOG_WARN("Could not load image: %s", info->path);
+        }
     }
 
     SetButtonsEnabled(true);
@@ -403,6 +530,7 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     // Destroy sorting UI and null all sorting-UI pointers
     DestroyChildren();
     m_imageBitmap    = nullptr;
+    m_openVideoBtn   = nullptr;
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
@@ -448,25 +576,26 @@ void SortPhotosPanel::ShowReviewStep()
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
     if (!frame) return;
 
-    const std::vector<wxString>* list = nullptr;
+    std::vector<wxString>* list = nullptr;
     wxString titleText, confirmLabel, skipLabel;
+    ReviewStep step = m_currentReviewStep;
 
-    switch (m_currentReviewStep) {
+    switch (step) {
         case ReviewStep::Folder1:
             list         = &m_folder1List;
-            titleText    = wxString::Format("-> Folder 1 - %zu image(s) to move", m_folder1List.size());
+            titleText    = wxString::Format("-> Folder 1 - %zu file(s) to move", m_folder1List.size());
             confirmLabel = "Confirm Move";
             skipLabel    = "Skip (keep in base folder)";
             break;
         case ReviewStep::Folder2:
             list         = &m_folder2List;
-            titleText    = wxString::Format("-> Folder 2 - %zu image(s) to move", m_folder2List.size());
+            titleText    = wxString::Format("-> Folder 2 - %zu file(s) to move", m_folder2List.size());
             confirmLabel = "Confirm Move";
             skipLabel    = "Skip (keep in base folder)";
             break;
         case ReviewStep::Delete:
             list         = &m_deleteList;
-            titleText    = wxString::Format("Delete - %zu image(s)", m_deleteList.size());
+            titleText    = wxString::Format("Delete - %zu file(s)", m_deleteList.size());
             confirmLabel = "Confirm Delete";
             skipLabel    = "Keep All";
             break;
@@ -481,8 +610,36 @@ void SortPhotosPanel::ShowReviewStep()
                                            wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
     vSizer->Add(title, 0, wxALIGN_CENTER | wxALL, 8);
 
-    // Scrollable thumbnail grid (same component as MainMenu preview)
+    // Scrollable thumbnail grid — interactive: hover any image to undo it
     ThumbnailGrid* thumbGrid = new ThumbnailGrid(this);
+    thumbGrid->SetRemoveCallback([this, list, title, step](const wxString& path) {
+        // Remove from the active review list
+        auto it = std::find(list->begin(), list->end(), path);
+        if (it != list->end()) list->erase(it);
+
+        // Keep action history consistent
+        m_actionHistory.erase(
+            std::remove_if(m_actionHistory.begin(), m_actionHistory.end(),
+                [&](const PendingAction& a) { return a.imagePath == path; }),
+            m_actionHistory.end());
+
+        // Persist updated lists
+        PersistList(m_folder1List, "_pending_folder1.txt");
+        PersistList(m_folder2List, "_pending_folder2.txt");
+        PersistList(m_deleteList,  "_pending_deletes.txt");
+
+        // Update the title label to reflect the new count
+        wxString newTitle;
+        switch (step) {
+            case ReviewStep::Folder1:
+                newTitle = wxString::Format("-> Folder 1 - %zu file(s) to move", list->size()); break;
+            case ReviewStep::Folder2:
+                newTitle = wxString::Format("-> Folder 2 - %zu file(s) to move", list->size()); break;
+            case ReviewStep::Delete:
+                newTitle = wxString::Format("Delete - %zu file(s)", list->size()); break;
+        }
+        title->SetLabel(newTitle);
+    });
     thumbGrid->SetImages(std::vector<wxString>(list->begin(), list->end()));
     vSizer->Add(thumbGrid, 1, wxEXPAND | wxALL, 6);
 
@@ -667,6 +824,7 @@ void SortPhotosPanel::ShowDoneState()
     m_inReview = true;
     DestroyChildren();
     m_imageBitmap    = nullptr;
+    m_openVideoBtn   = nullptr;
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;

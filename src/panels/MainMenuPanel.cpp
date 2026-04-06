@@ -1,4 +1,5 @@
 #include "utils/logging.h"
+#include "utils/MediaUtils.h"
 #include "panels/MainMenuPanel.h"
 #include "ui/PhotoQuickSorterFrame.h"
 #include "core/FolderLocations.h"
@@ -124,7 +125,7 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     // }
 
     // --- Base folder preview ---
-    m_thumbnailGrid = new ThumbnailGrid(this, "Select a Base Folder to preview images.");
+    m_thumbnailGrid = new ThumbnailGrid(this, "Select a Base Folder to preview media.");
     vbox->Add(m_thumbnailGrid, 1, wxEXPAND | wxALL, 5);
     vbox->Add(toSortPanelBtn, 0, wxEXPAND | wxALL, 8);
     SetSizer(vbox);
@@ -200,20 +201,20 @@ void MainMenuPanel::RefreshPreview(const wxString& folderPath)
     if (!m_thumbnailGrid) return;
 
     if (folderPath.IsEmpty() || !wxDir::Exists(folderPath)) {
-        m_thumbnailGrid->SetEmptyHint("Select a Base Folder to preview images.");
+        m_thumbnailGrid->SetEmptyHint("Select a Base Folder to preview media.");
         m_thumbnailGrid->SetImages({});
         Layout();
         return;
     }
 
-    // Collect image files (same extensions as ImageRepository)
-    const wxString exts[] = { "*.jpg", "*.jpeg", "*.png", "*.webp", "*.heic" };
+    // Collect all supported media files (images + videos)
     std::vector<wxString> files;
     wxDir dir(folderPath);
     if (dir.IsOpened()) {
-        for (const auto& ext : exts) {
+        wxArrayString specs = wxSplit(MediaUtils::GetMediaFileSpec(), ';');
+        for (const auto& spec : specs) {
             wxString fn;
-            bool has = dir.GetFirst(&fn, ext, wxDIR_FILES);
+            bool has = dir.GetFirst(&fn, spec, wxDIR_FILES);
             while (has) {
                 files.push_back(folderPath + wxFILE_SEP_PATH + fn);
                 has = dir.GetNext(&fn);
@@ -221,9 +222,10 @@ void MainMenuPanel::RefreshPreview(const wxString& folderPath)
         }
     }
     std::sort(files.begin(), files.end());
+    files.erase(std::unique(files.begin(), files.end()), files.end());
 
     if (files.empty()) {
-        m_thumbnailGrid->SetEmptyHint("This folder is empty - no supported images found.");
+        m_thumbnailGrid->SetEmptyHint("This folder is empty - no supported media files found.");
         m_thumbnailGrid->SetImages({});
         Layout();
         return;
@@ -354,10 +356,10 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
     LOG_DEBUG("Image repository built. Found %zu image(s).", imageCount);
 
     if (imageCount == 0) {
-        LOG_WARN("OnStartSorting: No supported images found in: %s", baseFolder);
+        LOG_WARN("OnStartSorting: No supported media files found in: %s", baseFolder);
         wxMessageBox(
-            "No images were found in the selected Base Folder.",
-            "No Images Found",
+            "No supported media files were found in the selected Base Folder.",
+            "No Media Found",
             wxOK | wxICON_INFORMATION,
             this);
         return;

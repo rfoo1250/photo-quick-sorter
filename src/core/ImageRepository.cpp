@@ -1,4 +1,5 @@
 #include "core/ImageRepository.h"
+#include "utils/MediaUtils.h"
 
 #include <wx/dir.h>
 #include <wx/filename.h>
@@ -73,7 +74,7 @@ bool ImageRepository::BuildFromFolder(const wxString& baseFolder,
     }
 
     // default filespec
-    wxString spec = filespec.IsEmpty() ? "*.jpg;*.jpeg;*.png;*.webp;*.heic" : filespec;
+    wxString spec = filespec.IsEmpty() ? MediaUtils::GetMediaFileSpec() : filespec;
 
     // split into patterns and collect
     wxArrayString patterns = SplitFileSpec(spec);

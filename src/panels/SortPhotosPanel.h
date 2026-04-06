@@ -29,6 +29,7 @@ public:
 private:
     // --- sorting UI (nulled after DestroyChildren) ---
     wxStaticBitmap* m_imageBitmap    = nullptr;
+    wxButton*       m_openVideoBtn   = nullptr;
     wxGauge*        m_progressBar    = nullptr;
     wxStaticText*   m_progressLabel  = nullptr;
     wxStaticText*   m_imageNameLabel = nullptr;
@@ -39,7 +40,8 @@ private:
     wxButton*       m_undoBtn     = nullptr;
 
     // --- session state ---
-    size_t                     m_currentIndex = 0;
+    size_t                     m_currentIndex   = 0;
+    bool                       m_currentIsVideo = false;
     std::vector<PendingAction> m_actionHistory;
     std::vector<wxString>      m_folder1List;
     std::vector<wxString>      m_folder2List;
