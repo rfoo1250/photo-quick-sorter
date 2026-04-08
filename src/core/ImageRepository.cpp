@@ -1,4 +1,5 @@
 #include "core/ImageRepository.h"
+#include "utils/MediaUtils.h"
 
 #include <wx/dir.h>
 #include <wx/filename.h>
@@ -72,8 +73,8 @@ bool ImageRepository::BuildFromFolder(const wxString& baseFolder,
         return false;
     }
 
-    // default filespec
-    wxString spec = filespec.IsEmpty() ? "*.jpg;*.jpeg;*.png;*.webp;*.heic" : filespec;
+    // Default to all supported media types when the caller doesn't override it.
+    wxString spec = filespec.IsEmpty() ? MediaUtils::GetMediaFileSpec() : filespec;
 
     // split into patterns and collect
     wxArrayString patterns = SplitFileSpec(spec);
@@ -102,7 +103,7 @@ bool ImageRepository::BuildFromFolder(const wxString& baseFolder,
         m_images.emplace_back(f, size, modTime);
     }
 
-    wxLogMessage("ImageRepository: scanned '%s', found %zu image(s)", baseFolder, m_images.size());
+    wxLogMessage("ImageRepository: scanned '%s', found %zu media file(s)", baseFolder, m_images.size());
     return true;
 }
 
@@ -189,7 +190,7 @@ bool ImageRepository::LoadFromFile(const wxString& loadPath)
     }
 
     file.Close();
-    wxLogMessage("ImageRepository: loaded %zu image(s) from '%s'", m_images.size(), loadPath);
+    wxLogMessage("ImageRepository: loaded %zu media file(s) from '%s'", m_images.size(), loadPath);
     return true;
 }
 

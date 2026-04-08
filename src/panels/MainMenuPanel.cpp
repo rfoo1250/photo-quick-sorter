@@ -1,4 +1,5 @@
 #include "utils/logging.h"
+#include "utils/MediaUtils.h"
 #include "panels/MainMenuPanel.h"
 #include "ui/PhotoQuickSorterFrame.h"
 #include "core/FolderLocations.h"
@@ -124,7 +125,7 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     // }
 
     // --- Base folder preview ---
-    m_thumbnailGrid = new ThumbnailGrid(this, "Select a Base Folder to preview images.");
+    m_thumbnailGrid = new ThumbnailGrid(this, "Select a Base Folder to preview media.");
     vbox->Add(m_thumbnailGrid, 1, wxEXPAND | wxALL, 5);
     vbox->Add(toSortPanelBtn, 0, wxEXPAND | wxALL, 8);
     SetSizer(vbox);
@@ -200,20 +201,20 @@ void MainMenuPanel::RefreshPreview(const wxString& folderPath)
     if (!m_thumbnailGrid) return;
 
     if (folderPath.IsEmpty() || !wxDir::Exists(folderPath)) {
-        m_thumbnailGrid->SetEmptyHint("Select a Base Folder to preview images.");
-        m_thumbnailGrid->SetImages({});
+        m_thumbnailGrid->SetEmptyHint("Select a Base Folder to preview media.");
+        m_thumbnailGrid->SetMedia({});
         Layout();
         return;
     }
 
-    // Collect image files (same extensions as ImageRepository)
-    const wxString exts[] = { "*.jpg", "*.jpeg", "*.png", "*.webp", "*.heic" };
+    // Collect supported media files (same extensions as ImageRepository)
+    const wxArrayString patterns = wxSplit(MediaUtils::GetMediaFileSpec(), ';');
     std::vector<wxString> files;
     wxDir dir(folderPath);
     if (dir.IsOpened()) {
-        for (const auto& ext : exts) {
+        for (const auto& pattern : patterns) {
             wxString fn;
-            bool has = dir.GetFirst(&fn, ext, wxDIR_FILES);
+            bool has = dir.GetFirst(&fn, pattern, wxDIR_FILES);
             while (has) {
                 files.push_back(folderPath + wxFILE_SEP_PATH + fn);
                 has = dir.GetNext(&fn);
@@ -221,15 +222,16 @@ void MainMenuPanel::RefreshPreview(const wxString& folderPath)
         }
     }
     std::sort(files.begin(), files.end());
+    files.erase(std::unique(files.begin(), files.end()), files.end());
 
     if (files.empty()) {
-        m_thumbnailGrid->SetEmptyHint("This folder is empty - no supported images found.");
-        m_thumbnailGrid->SetImages({});
+        m_thumbnailGrid->SetEmptyHint("This folder is empty - no supported media found.");
+        m_thumbnailGrid->SetMedia({});
         Layout();
         return;
     }
 
-    m_thumbnailGrid->SetImages(files);
+    m_thumbnailGrid->SetMedia(files);
     Layout();
 }
 
@@ -292,7 +294,7 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
             bool proceed = ShowIconDialog(this,
                 "Duplicate Folder Paths",
                 wxString::Format(
-                    "%s\nImages may overwrite each other or be sorted into their source folder.\n\nContinue anyway?",
+                    "%s\nMedia files may overwrite each other or be sorted into their source folder.\n\nContinue anyway?",
                     details),
                 true);
             if (!proceed) return;
@@ -311,7 +313,7 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
         bool proceed = ShowIconDialog(this,
             "Empty Folder Path",
             wxString::Format(
-                "%s not set.\n\nImages sorted to that destination will stay in the base folder.\n\nContinue anyway?",
+                "%s not set.\n\nMedia files sorted to that destination will stay in the base folder.\n\nContinue anyway?",
                 which),
             true);
         if (!proceed) return;
@@ -337,27 +339,27 @@ void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
         }
     }
 
-    // 4) Scan base folder for images
-    LOG_DEBUG("Building image repository from base folder...");
+    // 4) Scan base folder for supported media
+    LOG_DEBUG("Building media repository from base folder...");
     frame->imageRepo.Clear();
     if (!frame->imageRepo.BuildFromFolder(baseFolder)) {
         LOG_ERROR("OnStartSorting: Failed to scan folder: %s", baseFolder);
         wxMessageBox(
-            "Failed to scan the Base Folder for images.",
+            "Failed to scan the Base Folder for supported media.",
             "Scan Failed",
             wxOK | wxICON_ERROR,
             this);
         return;
     }
 
-    const size_t imageCount = frame->imageRepo.GetCount();
-    LOG_DEBUG("Image repository built. Found %zu image(s).", imageCount);
+    const size_t mediaCount = frame->imageRepo.GetCount();
+    LOG_DEBUG("Media repository built. Found %zu media file(s).", mediaCount);
 
-    if (imageCount == 0) {
-        LOG_WARN("OnStartSorting: No supported images found in: %s", baseFolder);
+    if (mediaCount == 0) {
+        LOG_WARN("OnStartSorting: No supported media found in: %s", baseFolder);
         wxMessageBox(
-            "No images were found in the selected Base Folder.",
-            "No Images Found",
+            "No supported media files were found in the selected Base Folder.",
+            "No Media Found",
             wxOK | wxICON_INFORMATION,
             this);
         return;

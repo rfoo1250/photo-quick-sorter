@@ -70,6 +70,9 @@ endif()
 # Link against wxWidgets libraries discovered by find_package
 target_link_libraries(PhotoQuickSorter PRIVATE ${wxWidgets_LIBRARIES})
 
+# Windows Media Foundation (MFPlay) for video playback
+target_link_libraries(PhotoQuickSorter PRIVATE mfplay.lib mfplat.lib mfuuid.lib)
+
 # Link bundled wxWidgets third-party libs (not included by find_package automatically)
 # These are required by wxmsw33ud_core.lib for image format support
 target_link_libraries(PhotoQuickSorter PRIVATE

@@ -2,12 +2,64 @@
 #include "ui/PhotoQuickSorterFrame.h"
 #include "ui/ThumbnailGrid.h"
 #include "utils/logging.h"
+#include "utils/MediaUtils.h"
 #include <wx/filename.h>
 #include <wx/filefn.h>
 #include <wx/dir.h>
 #include <wx/textfile.h>
 #include <wx/stdpaths.h>
 #include <algorithm>
+
+#ifdef __WXMSW__
+#include <mfplay.h>
+#include <propvarutil.h>
+#endif
+
+// ─────────────────────────────────────────────
+// MFPlay callback (fires on UI thread)
+// ─────────────────────────────────────────────
+
+#ifdef __WXMSW__
+class MFPlayCallback : public IMFPMediaPlayerCallback {
+public:
+    explicit MFPlayCallback(SortPhotosPanel* owner) : m_owner(owner) {}
+
+    ULONG   STDMETHODCALLTYPE AddRef()  override { return ++m_ref; }
+    ULONG   STDMETHODCALLTYPE Release() override {
+        ULONG r = --m_ref; if (r == 0) delete this; return r;
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (riid == IID_IUnknown || riid == __uuidof(IMFPMediaPlayerCallback))
+            { *ppv = this; AddRef(); return S_OK; }
+        *ppv = nullptr; return E_NOINTERFACE;
+    }
+
+    void STDMETHODCALLTYPE OnMediaPlayerEvent(MFP_EVENT_HEADER* pHdr) override {
+        if (!m_owner || !pHdr) return;
+        if (FAILED(pHdr->hrEvent)) {
+            m_owner->OnVideoPlayerError(pHdr->eEventType, pHdr->hrEvent);
+            return;
+        }
+        switch (pHdr->eEventType) {
+            case MFP_EVENT_TYPE_MEDIAITEM_CREATED:
+                m_owner->OnVideoItemCreated(MFP_GET_MEDIAITEM_CREATED_EVENT(pHdr));
+                break;
+            case MFP_EVENT_TYPE_MEDIAITEM_SET:
+                m_owner->OnVideoItemReady();
+                break;
+            case MFP_EVENT_TYPE_PLAYBACK_ENDED:
+                m_owner->OnVideoPlaybackEnded();
+                break;
+            default:
+                break;
+        }
+    }
+
+private:
+    SortPhotosPanel*   m_owner;
+    std::atomic<ULONG> m_ref{1};
+};
+#endif // __WXMSW__
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -35,6 +87,8 @@ wxBitmap SortPhotosPanel::LoadKeycap(const wxString& filename, int size) const
 SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
     : wxPanel(parent)
 {
+    m_posTimer = new wxTimer(this, ID_VIDEO_POS_TIMER);
+    Bind(wxEVT_TIMER, &SortPhotosPanel::OnPosTimer, this, ID_VIDEO_POS_TIMER);
     BuildSortingUI();
     Bind(wxEVT_SIZE, &SortPhotosPanel::OnSize, this);
     wxGetTopLevelParent(this)->Bind(wxEVT_CHAR_HOOK, &SortPhotosPanel::OnKeyDown, this);
@@ -42,7 +96,27 @@ SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
 
 void SortPhotosPanel::BuildSortingUI()
 {
-    m_imageBitmap    = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
+    m_imageBitmap = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
+
+    // Video render target + controls (hidden until a video loads)
+    m_videoPanel = new wxPanel(this, wxID_ANY);
+    m_videoPanel->SetBackgroundColour(*wxBLACK);
+    m_videoPanel->Hide();
+    m_videoPanel->Bind(wxEVT_PAINT, &SortPhotosPanel::OnVideoPanelPaint, this);
+    m_videoPanel->Bind(wxEVT_SIZE,  &SortPhotosPanel::OnVideoPanelSize,  this);
+
+    m_playPauseBtn = new wxButton(this, wxID_ANY, "Play");
+    m_seekSlider   = new wxSlider(this, wxID_ANY, 0, 0, 1000);
+    m_posLabel     = new wxStaticText(this, wxID_ANY, "0:00 / 0:00",
+                                      wxDefaultPosition, wxSize(90, -1));
+    m_playPauseBtn->Hide();
+    m_seekSlider->Hide();
+    m_posLabel->Hide();
+
+    m_playPauseBtn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnPlayPause, this);
+    m_seekSlider  ->Bind(wxEVT_SCROLL_THUMBTRACK,   &SortPhotosPanel::OnSeekTrack,   this);
+    m_seekSlider  ->Bind(wxEVT_SCROLL_THUMBRELEASE, &SortPhotosPanel::OnSeekRelease, this);
+    m_seekSlider  ->Bind(wxEVT_SCROLL_CHANGED,      &SortPhotosPanel::OnSeekChanged, this);
     m_imageNameLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER | wxST_ELLIPSIZE_END);
     m_progressLabel  = new wxStaticText(this, wxID_ANY, "0/0", wxDefaultPosition, wxSize(60, -1), wxALIGN_RIGHT);
     m_progressBar    = new wxGauge(this, wxID_ANY, 1, wxDefaultPosition, wxDefaultSize, wxGA_HORIZONTAL | wxGA_SMOOTH);
@@ -77,6 +151,13 @@ void SortPhotosPanel::BuildSortingUI()
     wxBoxSizer* imageCell = new wxBoxSizer(wxVERTICAL);
     imageCell->Add(m_imageNameLabel, 0, wxALIGN_CENTER | wxBOTTOM, 4);
     imageCell->Add(m_imageBitmap,    0, wxALIGN_CENTER);
+    imageCell->Add(m_videoPanel,     1, wxEXPAND);
+
+    wxBoxSizer* videoCtrlRow = new wxBoxSizer(wxHORIZONTAL);
+    videoCtrlRow->Add(m_playPauseBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    videoCtrlRow->Add(m_seekSlider,   1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    videoCtrlRow->Add(m_posLabel,     0, wxALIGN_CENTER_VERTICAL);
+    imageCell->Add(videoCtrlRow, 0, wxEXPAND | wxTOP, 4);
 
     grid->Add(m_folder1Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(imageCell,    1, wxEXPAND, 10);
@@ -106,6 +187,9 @@ void SortPhotosPanel::BuildSortingUI()
 
 SortPhotosPanel::~SortPhotosPanel()
 {
+    ShutdownPlayer(); // must happen before HWND is destroyed
+    delete m_posTimer;
+    m_posTimer = nullptr;
     wxWindow* tlw = wxGetTopLevelParent(this);
     if (tlw) tlw->Unbind(wxEVT_CHAR_HOOK, &SortPhotosPanel::OnKeyDown, this);
 }
@@ -135,6 +219,7 @@ void SortPhotosPanel::RefreshData()
 
     // Reset session state
     m_currentIndex    = 0;
+    m_currentIsVideo  = false;
     m_inReview        = false;
     m_folder1Shown    = false;
     m_folder2Shown    = false;
@@ -142,10 +227,16 @@ void SortPhotosPanel::RefreshData()
     m_folder1Confirmed = false;
     m_folder2Confirmed = false;
     m_deleteConfirmed  = false;
+    m_videoReady      = false;
+    m_videoOpening    = false;
+    m_seekInProgress  = false;
+    m_updatingSeekUi  = false;
     m_actionHistory.clear();
     m_folder1List.clear();
     m_folder2List.clear();
     m_deleteList.clear();
+
+    StopActiveVideo(false);
 
     // Crash recovery: check for leftover txt files from a previous session
     CheckForPendingSession();
@@ -225,7 +316,7 @@ void SortPhotosPanel::CheckForPendingSession()
         for (size_t idx : toRemove)
             frame->imageRepo.RemoveAt(idx);
 
-        LOG_INFO("Resumed previous session: %zu F1, %zu F2, %zu delete, %zu image(s) remaining",
+        LOG_INFO("Resumed previous session: %zu F1, %zu F2, %zu delete, %zu media file(s) remaining",
                  m_folder1List.size(), m_folder2List.size(), m_deleteList.size(),
                  frame->imageRepo.GetCount());
     } else {
@@ -257,29 +348,45 @@ void SortPhotosPanel::LoadCurrentImage()
     m_progressLabel->SetLabel(wxString::Format("%zu/%zu", m_currentIndex, total));
     m_imageNameLabel->SetLabel(wxFileName(info->path).GetFullName());
 
-    wxImage img(info->path, wxBITMAP_TYPE_ANY);
-    if (img.IsOk()) {
+    m_currentIsVideo = MediaUtils::IsVideoFile(info->path);
+    StopActiveVideo(false);
+
+    if (m_currentIsVideo) {
+        m_imageBitmap->Hide();
+        m_videoPanel->Show();
+        ResetVideoControls("Loading...", true, false, false, "Loading");
         Layout();
-        wxSize panel = GetClientSize();
-        // Available width: panel minus both side button columns + their margins
-        int btnW = m_folder1Btn->GetSize().x + 16;
-        int maxW = panel.x - 2 * btnW;
-        // Available height: 75% of panel height
-        int maxH = (int)(panel.y * 0.75);
-        wxSize available(std::max(maxW, 1), std::max(maxH, 1));
-        if (available.x > 1 && available.y > 1) {
-            double scaleX = (double)available.x / img.GetWidth();
-            double scaleY = (double)available.y / img.GetHeight();
-            double scale  = std::min(scaleX, scaleY);
-            if (scale < 1.0)
-                img = img.Scale((int)(img.GetWidth() * scale),
-                                (int)(img.GetHeight() * scale),
-                                wxIMAGE_QUALITY_HIGH);
-        }
-        m_imageBitmap->SetBitmap(wxBitmap(img));
+        m_videoPanel->Refresh();
+        m_videoPanel->Update();
+        OpenCurrentVideo(info->path);
     } else {
-        m_imageBitmap->SetBitmap(wxNullBitmap);
-        LOG_WARN("Could not load image: %s", info->path);
+        m_videoPanel->Hide();
+        ResetVideoControls("0:00 / 0:00", false, false, false, "Play");
+        m_videoPanel->Refresh();
+        m_imageBitmap->Show();
+
+        wxImage img(info->path, wxBITMAP_TYPE_ANY);
+        if (img.IsOk()) {
+            Layout();
+            wxSize panel = GetClientSize();
+            int btnW = m_folder1Btn->GetSize().x + 16;
+            int maxW = panel.x - 2 * btnW;
+            int maxH = (int)(panel.y * 0.75);
+            wxSize available(std::max(maxW, 1), std::max(maxH, 1));
+            if (available.x > 1 && available.y > 1) {
+                double scaleX = (double)available.x / img.GetWidth();
+                double scaleY = (double)available.y / img.GetHeight();
+                double scale  = std::min(scaleX, scaleY);
+                if (scale < 1.0)
+                    img = img.Scale((int)(img.GetWidth() * scale),
+                                    (int)(img.GetHeight() * scale),
+                                    wxIMAGE_QUALITY_HIGH);
+            }
+            m_imageBitmap->SetBitmap(wxBitmap(img));
+        } else {
+            m_imageBitmap->SetBitmap(wxNullBitmap);
+            LOG_WARN("Could not load image: %s", info->path);
+        }
     }
 
     SetButtonsEnabled(true);
@@ -401,8 +508,13 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     m_inReview = true;
 
     // Destroy sorting UI and null all sorting-UI pointers
+    ShutdownPlayer(); // must happen before DestroyChildren destroys m_videoPanel's HWND
     DestroyChildren();
     m_imageBitmap    = nullptr;
+    m_videoPanel     = nullptr;
+    m_playPauseBtn   = nullptr;
+    m_seekSlider     = nullptr;
+    m_posLabel       = nullptr;
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
@@ -454,19 +566,19 @@ void SortPhotosPanel::ShowReviewStep()
     switch (m_currentReviewStep) {
         case ReviewStep::Folder1:
             list         = &m_folder1List;
-            titleText    = wxString::Format("-> Folder 1 - %zu image(s) to move", m_folder1List.size());
+            titleText    = wxString::Format("-> Folder 1 - %zu media file(s) to move", m_folder1List.size());
             confirmLabel = "Confirm Move";
             skipLabel    = "Skip (keep in base folder)";
             break;
         case ReviewStep::Folder2:
             list         = &m_folder2List;
-            titleText    = wxString::Format("-> Folder 2 - %zu image(s) to move", m_folder2List.size());
+            titleText    = wxString::Format("-> Folder 2 - %zu media file(s) to move", m_folder2List.size());
             confirmLabel = "Confirm Move";
             skipLabel    = "Skip (keep in base folder)";
             break;
         case ReviewStep::Delete:
             list         = &m_deleteList;
-            titleText    = wxString::Format("Delete - %zu image(s)", m_deleteList.size());
+            titleText    = wxString::Format("Delete - %zu media file(s)", m_deleteList.size());
             confirmLabel = "Confirm Delete";
             skipLabel    = "Keep All";
             break;
@@ -483,7 +595,7 @@ void SortPhotosPanel::ShowReviewStep()
 
     // Scrollable thumbnail grid (same component as MainMenu preview)
     ThumbnailGrid* thumbGrid = new ThumbnailGrid(this);
-    thumbGrid->SetImages(std::vector<wxString>(list->begin(), list->end()));
+    thumbGrid->SetMedia(std::vector<wxString>(list->begin(), list->end()));
     vSizer->Add(thumbGrid, 1, wxEXPAND | wxALL, 6);
 
     // Buttons
@@ -662,11 +774,394 @@ void SortPhotosPanel::SetButtonsEnabled(bool enabled)
     if (m_undoBtn)    m_undoBtn   ->Enable(enabled);
 }
 
+// ─────────────────────────────────────────────
+// Video helpers
+// ─────────────────────────────────────────────
+
+bool SortPhotosPanel::EnsurePlayerCreated()
+{
+#ifdef __WXMSW__
+    if (m_player) return true;
+    if (!m_videoPanel || !m_videoPanel->GetHWND()) {
+        LOG_ERROR("EnsurePlayerCreated: video panel HWND is not ready");
+        return false;
+    }
+
+    auto* cb = new MFPlayCallback(this); // ref=1
+    HRESULT hr = MFPCreateMediaPlayer(
+        nullptr,
+        FALSE,
+        MFP_OPTION_NONE,
+        cb,
+        (HWND)m_videoPanel->GetHWND(),
+        &m_player);
+    cb->Release(); // player keeps its own ref
+
+    if (FAILED(hr)) {
+        m_player = nullptr;
+        LOG_ERROR("MFPCreateMediaPlayer failed: hr=0x%08X", (unsigned)hr);
+        return false;
+    }
+
+    return true;
+#else
+    return false;
+#endif
+}
+
+void SortPhotosPanel::OpenCurrentVideo(const wxString& path)
+{
+#ifdef __WXMSW__
+    if (!m_currentIsVideo || m_inReview) return;
+
+    if (!EnsurePlayerCreated()) {
+        ShowVideoErrorState("Unavailable");
+        return;
+    }
+
+    m_videoOpening = true;
+    m_videoReady   = false;
+    m_seekInProgress = false;
+    m_videoDuration = 0;
+    m_pendingSetToken = 0;
+    const std::uint64_t token = ++m_videoRequestToken;
+
+    HRESULT hr = m_player->CreateMediaItemFromURL(
+        path.wc_str(),
+        FALSE, // async open
+        static_cast<DWORD_PTR>(token),
+        nullptr);
+    if (FAILED(hr)) {
+        LOG_ERROR("CreateMediaItemFromURL failed for '%s': hr=0x%08X",
+                  path, (unsigned)hr);
+        ShowVideoErrorState("Unavailable");
+        return;
+    }
+#else
+    wxUnusedVar(path);
+    ShowVideoErrorState("Unsupported");
+#endif
+}
+
+void SortPhotosPanel::StopActiveVideo(bool releasePlayer)
+{
+#ifdef __WXMSW__
+    ++m_videoRequestToken; // invalidate any in-flight async callbacks
+    m_pendingSetToken = 0;
+#endif
+    m_videoOpening   = false;
+    m_videoReady     = false;
+    m_seekInProgress = false;
+    m_updatingSeekUi = false;
+    m_videoDuration  = 0;
+
+#ifdef __WXMSW__
+    if (m_posTimer && m_posTimer->IsRunning())
+        m_posTimer->Stop();
+
+    if (m_player) {
+        m_player->Stop();
+        if (releasePlayer) {
+            m_player->Shutdown();
+            m_player->Release();
+            m_player = nullptr;
+        }
+    }
+#endif
+}
+
+void SortPhotosPanel::ShutdownPlayer()
+{
+    StopActiveVideo(true);
+}
+
+void SortPhotosPanel::ResetVideoControls(const wxString& statusText,
+                                         bool showControls,
+                                         bool enablePlay,
+                                         bool enableSeek,
+                                         const wxString& playLabel)
+{
+    if (m_playPauseBtn) {
+        if (showControls) m_playPauseBtn->Show();
+        else m_playPauseBtn->Hide();
+        m_playPauseBtn->SetLabel(playLabel);
+        m_playPauseBtn->Enable(showControls && enablePlay);
+    }
+
+    if (m_seekSlider) {
+        if (showControls) m_seekSlider->Show();
+        else m_seekSlider->Hide();
+        m_updatingSeekUi = true;
+        m_seekSlider->SetValue(0);
+        m_updatingSeekUi = false;
+        m_seekSlider->Enable(showControls && enableSeek);
+    }
+
+    if (m_posLabel) {
+        if (showControls) m_posLabel->Show();
+        else m_posLabel->Hide();
+        m_posLabel->SetLabel(statusText);
+    }
+}
+
+void SortPhotosPanel::ShowVideoErrorState(const wxString& statusText)
+{
+    m_videoOpening = false;
+    m_videoReady   = false;
+    m_seekInProgress = false;
+    m_pendingSetToken = 0;
+    if (m_posTimer && m_posTimer->IsRunning())
+        m_posTimer->Stop();
+
+    ResetVideoControls(statusText, true, false, false, "Play");
+    if (m_videoPanel) {
+        m_videoPanel->Show();
+        m_videoPanel->Refresh();
+    }
+    Layout();
+}
+
+void SortPhotosPanel::UpdateVideoSurface()
+{
+#ifdef __WXMSW__
+    if (!m_player || !m_videoPanel || !m_currentIsVideo || !m_videoReady || m_inReview)
+        return;
+    m_player->UpdateVideo();
+#endif
+}
+
+#ifdef __WXMSW__
+void SortPhotosPanel::OnVideoItemCreated(MFP_MEDIAITEM_CREATED_EVENT* evt)
+{
+    if (!evt || !evt->pMediaItem || !m_player || !m_currentIsVideo || m_inReview)
+        return;
+
+    DWORD_PTR userData = 0;
+    HRESULT hr = evt->pMediaItem->GetUserData(&userData);
+    if (FAILED(hr)) {
+        LOG_ERROR("GetUserData failed: hr=0x%08X", (unsigned)hr);
+        ShowVideoErrorState("Unavailable");
+        return;
+    }
+
+    const std::uint64_t token = static_cast<std::uint64_t>(userData);
+    if (!m_videoOpening || token != m_videoRequestToken)
+        return;
+
+    BOOL hasVideo = FALSE;
+    BOOL isSelected = FALSE;
+    hr = evt->pMediaItem->HasVideo(&hasVideo, &isSelected);
+    if (FAILED(hr)) {
+        LOG_ERROR("HasVideo failed: hr=0x%08X", (unsigned)hr);
+        ShowVideoErrorState("Unavailable");
+        return;
+    }
+
+    if (!(hasVideo && isSelected)) {
+        LOG_WARN("Selected media item does not expose a playable video stream");
+        ShowVideoErrorState("No video");
+        return;
+    }
+
+    m_pendingSetToken = token;
+    hr = m_player->SetMediaItem(evt->pMediaItem);
+    if (FAILED(hr)) {
+        LOG_ERROR("SetMediaItem failed: hr=0x%08X", (unsigned)hr);
+        ShowVideoErrorState("Unavailable");
+    }
+}
+
+void SortPhotosPanel::OnVideoPlayerError(MFP_EVENT_TYPE eventType, HRESULT hr)
+{
+    if (!m_currentIsVideo || !m_videoPanel || m_inReview)
+        return;
+
+    LOG_ERROR("MFPlay event failed: type=%d hr=0x%08X", (int)eventType, (unsigned)hr);
+
+    if (m_videoOpening || m_videoReady)
+        ShowVideoErrorState("Unavailable");
+}
+#endif
+
+void SortPhotosPanel::OnVideoItemReady()
+{
+#ifdef __WXMSW__
+    if (!m_player || !m_currentIsVideo || !m_videoPanel || m_inReview)
+        return;
+    if (!m_videoOpening || m_pendingSetToken == 0 || m_pendingSetToken != m_videoRequestToken)
+        return;
+
+    m_videoOpening = false;
+    m_videoReady   = true;
+    m_seekInProgress = false;
+    m_videoDuration = 0;
+
+    PROPVARIANT dur = {};
+    if (SUCCEEDED(m_player->GetDuration(MFP_POSITIONTYPE_100NS, &dur)))
+        m_videoDuration = dur.hVal.QuadPart;
+    PropVariantClear(&dur);
+
+    long totalSec = (long)(m_videoDuration / 10'000'000LL);
+    ResetVideoControls(
+        wxString::Format("0:00 / %ld:%02ld", totalSec / 60, totalSec % 60),
+        true,
+        true,
+        m_videoDuration > 0,
+        "Play");
+
+    HRESULT hr = m_player->Play();
+    if (FAILED(hr)) {
+        LOG_ERROR("IMFPMediaPlayer::Play failed: hr=0x%08X", (unsigned)hr);
+        ShowVideoErrorState("Unavailable");
+        return;
+    }
+
+    if (m_posTimer)
+        m_posTimer->Start(250);
+    if (m_playPauseBtn)
+        m_playPauseBtn->SetLabel("Pause");
+
+    UpdateVideoSurface();
+    m_videoPanel->Refresh();
+#endif
+}
+
+void SortPhotosPanel::OnVideoPlaybackEnded()
+{
+    if (!m_currentIsVideo || !m_videoReady) return;
+    if (m_posTimer) m_posTimer->Stop();
+    if (m_playPauseBtn) m_playPauseBtn->SetLabel("Play");
+    if (m_seekSlider && m_videoDuration > 0) {
+        m_updatingSeekUi = true;
+        m_seekSlider->SetValue(1000);
+        m_updatingSeekUi = false;
+    }
+    UpdateVideoSurface();
+}
+
+void SortPhotosPanel::OnPosTimer(wxTimerEvent&)
+{
+#ifdef __WXMSW__
+    if (!m_player || !m_videoReady || m_videoDuration <= 0 || m_seekInProgress) return;
+    PROPVARIANT pos = {};
+    if (SUCCEEDED(m_player->GetPosition(MFP_POSITIONTYPE_100NS, &pos))) {
+        long long p = pos.hVal.QuadPart;
+        PropVariantClear(&pos);
+        if (m_seekSlider) {
+            m_updatingSeekUi = true;
+            m_seekSlider->SetValue((int)(p * 1000 / m_videoDuration));
+            m_updatingSeekUi = false;
+        }
+        long cur = (long)(p / 10'000'000LL);
+        long tot = (long)(m_videoDuration / 10'000'000LL);
+        if (m_posLabel) {
+            m_posLabel->SetLabel(wxString::Format("%ld:%02ld / %ld:%02ld",
+                cur / 60, cur % 60, tot / 60, tot % 60));
+        }
+    }
+#endif
+}
+
+void SortPhotosPanel::OnPlayPause(wxCommandEvent&)
+{
+#ifdef __WXMSW__
+    if (!m_player || !m_videoReady || m_videoOpening) return;
+    MFP_MEDIAPLAYER_STATE state = MFP_MEDIAPLAYER_STATE_EMPTY;
+    m_player->GetState(&state);
+    if (state == MFP_MEDIAPLAYER_STATE_PLAYING) {
+        m_player->Pause();
+        if (m_posTimer) m_posTimer->Stop();
+        if (m_playPauseBtn) m_playPauseBtn->SetLabel("Play");
+        UpdateVideoSurface();
+    } else {
+        HRESULT hr = m_player->Play();
+        if (FAILED(hr)) {
+            LOG_ERROR("Play failed from OnPlayPause: hr=0x%08X", (unsigned)hr);
+            ShowVideoErrorState("Unavailable");
+            return;
+        }
+        if (m_posTimer) m_posTimer->Start(250);
+        if (m_playPauseBtn) m_playPauseBtn->SetLabel("Pause");
+        UpdateVideoSurface();
+    }
+#endif
+}
+
+void SortPhotosPanel::OnSeekTrack(wxScrollEvent& evt)
+{
+    evt.Skip();
+    if (!m_player || !m_videoReady || m_videoDuration <= 0 || m_updatingSeekUi) return;
+    m_seekInProgress = true;
+    long long target = (long long)m_seekSlider->GetValue() * m_videoDuration / 1000;
+    long cur = (long)(target / 10'000'000LL);
+    long tot = (long)(m_videoDuration / 10'000'000LL);
+    if (m_posLabel) {
+        m_posLabel->SetLabel(wxString::Format("%ld:%02ld / %ld:%02ld",
+            cur / 60, cur % 60, tot / 60, tot % 60));
+    }
+}
+
+void SortPhotosPanel::OnSeekRelease(wxScrollEvent& evt)
+{
+    evt.Skip();
+    m_seekInProgress = false;
+}
+
+void SortPhotosPanel::OnSeekChanged(wxScrollEvent& evt)
+{
+    evt.Skip();
+#ifdef __WXMSW__
+    if (!m_player || !m_videoReady || m_videoDuration <= 0 || m_updatingSeekUi) return;
+    m_seekInProgress = false;
+    long long target = (long long)m_seekSlider->GetValue() * m_videoDuration / 1000;
+    PROPVARIANT pos = {};
+    pos.vt = VT_I8;
+    pos.hVal.QuadPart = target;
+    HRESULT hr = m_player->SetPosition(MFP_POSITIONTYPE_100NS, &pos);
+    PropVariantClear(&pos);
+    if (FAILED(hr)) {
+        LOG_ERROR("SetPosition failed: hr=0x%08X", (unsigned)hr);
+        ShowVideoErrorState("Unavailable");
+        return;
+    }
+    long cur = (long)(target / 10'000'000LL);
+    long tot = (long)(m_videoDuration / 10'000'000LL);
+    if (m_posLabel) {
+        m_posLabel->SetLabel(wxString::Format("%ld:%02ld / %ld:%02ld",
+            cur / 60, cur % 60, tot / 60, tot % 60));
+    }
+    UpdateVideoSurface();
+#endif
+}
+
+void SortPhotosPanel::OnVideoPanelPaint(wxPaintEvent&)
+{
+    if (!m_videoPanel) return;
+    wxPaintDC dc(m_videoPanel);
+    if (!m_player || !m_currentIsVideo || !m_videoReady) {
+        dc.SetBackground(wxBrush(*wxBLACK));
+        dc.Clear();
+        return;
+    }
+    UpdateVideoSurface();
+}
+
+void SortPhotosPanel::OnVideoPanelSize(wxSizeEvent& evt)
+{
+    evt.Skip();
+    UpdateVideoSurface();
+}
+
 void SortPhotosPanel::ShowDoneState()
 {
     m_inReview = true;
+    ShutdownPlayer(); // must happen before DestroyChildren destroys m_videoPanel's HWND
     DestroyChildren();
     m_imageBitmap    = nullptr;
+    m_videoPanel     = nullptr;
+    m_playPauseBtn   = nullptr;
+    m_seekSlider     = nullptr;
+    m_posLabel       = nullptr;
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
@@ -676,7 +1171,7 @@ void SortPhotosPanel::ShowDoneState()
     wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
     vSizer->AddStretchSpacer();
 
-    wxStaticText* msg = new wxStaticText(this, wxID_ANY, "All Done!\nAll images were saved.",
+    wxStaticText* msg = new wxStaticText(this, wxID_ANY, "All Done!\nAll media were processed.",
                                           wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
     wxFont f = msg->GetFont();
     f.SetPointSize(f.GetPointSize() + 6);
@@ -707,6 +1202,10 @@ void SortPhotosPanel::OnSize(wxSizeEvent& evt)
 {
     evt.Skip();
     if (m_inReview) return;
+    if (m_currentIsVideo) {
+        UpdateVideoSurface();
+        return;
+    }
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
     if (frame && frame->imageRepo.GetCount() > 0 && IsShown() && m_imageBitmap)
         LoadCurrentImage();

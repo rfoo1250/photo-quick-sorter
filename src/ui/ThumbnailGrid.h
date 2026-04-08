@@ -1,44 +1,56 @@
 #pragma once
 #include <wx/wx.h>
 #include <wx/scrolwin.h>
-#include <wx/statbmp.h>
 #include <vector>
 #include <memory>
 #include <atomic>
+#include <functional>
 
-// Scrollable 3-column thumbnail grid.
+// Scrollable 3-column thumbnail grid for image and video media.
 //
-// Usage:
-//   auto* grid = new ThumbnailGrid(parent, "Select a folder to see images.");
-//   grid->SetImages(paths);   // pass empty vector to show the hint
+// Plain usage (preview only):
+//   auto* grid = new ThumbnailGrid(parent, "Select a folder.");
+//   grid->SetMedia(paths);
 //
-// Placeholder cells appear immediately; images load on a background thread
-// and pop in one by one. Automatically recomputes thumb size on window resize.
+// Interactive usage (review steps — each cell has a hover "Undo" overlay):
+//   grid->SetRemoveCallback([](const wxString& removedPath) { ... });
+//   grid->SetMedia(paths);  // call AFTER SetRemoveCallback
+//
+// Media thumbnails load on a background thread; gray placeholders appear immediately.
 class ThumbnailGrid : public wxScrolledWindow {
 public:
     explicit ThumbnailGrid(wxWindow* parent,
-                           const wxString& emptyHint = "No images.");
+                           const wxString& emptyHint = "No media.");
     ~ThumbnailGrid();
 
-    // Replace displayed images. Empty vector shows the empty hint.
+    // Replace displayed media. Empty vector shows the empty hint.
+    void SetMedia(const std::vector<wxString>& paths);
+
+    // Backward-compatible name kept for older call sites.
     void SetImages(const std::vector<wxString>& paths);
 
-    // Change the text shown when images list is empty.
+    // Change the text shown when the media list is empty.
     void SetEmptyHint(const wxString& hint);
+
+    // Enable per-item removal. When set, each cell gets a hover "Undo" overlay.
+    // The callback is called (on the main thread) with the removed path BEFORE
+    // the grid rebuilds itself. Call this before SetMedia/SetImages.
+    void SetRemoveCallback(std::function<void(const wxString&)> cb);
 
 private:
     void Rebuild();
     void CancelPendingLoad();
+    void OnItemRemove(const wxString& path);
     void OnSize(wxSizeEvent& evt);
 
     std::vector<wxString>  m_paths;
     wxString               m_emptyHint;
 
-    // Cancellation token shared with the background thread.
-    // Replaced on every Rebuild(); the thread holds its own shared_ptr copy.
     std::shared_ptr<std::atomic<bool>> m_cancelToken;
 
-    // Raw pointers to the per-slot wxStaticBitmap placeholders (owned by wx).
-    // Index matches m_paths. Cleared and repopulated on every Rebuild().
-    std::vector<wxStaticBitmap*> m_thumbWidgets;
+    // Per-slot update function: called on the main thread when a background-loaded
+    // bitmap is ready. Replaces the placeholder with the real thumbnail.
+    std::vector<std::function<void(const wxBitmap&)>> m_thumbUpdaters;
+
+    std::function<void(const wxString&)> m_removeCallback;
 };

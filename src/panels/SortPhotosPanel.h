@@ -4,7 +4,11 @@
 #include <wx/scrolwin.h>
 #include <wx/wrapsizer.h>
 #include <wx/gauge.h>
+#include <cstdint>
 #include <vector>
+#ifdef __WXMSW__
+#include <mfplay.h>
+#endif
 
 enum {
     ID_SORT_FOLDER1      = wxID_HIGHEST + 100,
@@ -13,14 +17,18 @@ enum {
     ID_SORT_DELETE,
     ID_SORT_UNDO         = wxID_HIGHEST + 104,
     ID_SORT_STEP_CONFIRM = wxID_HIGHEST + 105,
-    ID_SORT_STEP_SKIP    = wxID_HIGHEST + 106
+    ID_SORT_STEP_SKIP    = wxID_HIGHEST + 106,
+    ID_VIDEO_POS_TIMER   = wxID_HIGHEST + 107
 };
 
 enum class SortAction { MoveToFolder1, MoveToFolder2, Save, Delete };
 struct PendingAction   { wxString imagePath; SortAction type; };
 enum class ReviewStep  { Folder1, Folder2, Delete };
 
+class MFPlayCallback; // forward declaration for friend
+
 class SortPhotosPanel : public wxPanel {
+    friend class MFPlayCallback;
 public:
     explicit SortPhotosPanel(wxWindow* parent);
     ~SortPhotosPanel();
@@ -37,9 +45,24 @@ private:
     wxButton*       m_saveBtn     = nullptr;
     wxButton*       m_deleteBtn   = nullptr;
     wxButton*       m_undoBtn     = nullptr;
+    // video UI (hidden when showing images)
+    wxPanel*        m_videoPanel     = nullptr;
+    wxButton*       m_playPauseBtn   = nullptr;
+    wxSlider*       m_seekSlider     = nullptr;
+    wxStaticText*   m_posLabel       = nullptr;
 
     // --- session state ---
-    size_t                     m_currentIndex = 0;
+    size_t                     m_currentIndex   = 0;
+    bool                       m_currentIsVideo = false;
+    IMFPMediaPlayer*           m_player         = nullptr;
+    wxTimer*                   m_posTimer       = nullptr;
+    LONGLONG                   m_videoDuration  = 0; // 100ns units
+    std::uint64_t              m_videoRequestToken = 0;
+    std::uint64_t              m_pendingSetToken   = 0;
+    bool                       m_videoOpening   = false;
+    bool                       m_videoReady     = false;
+    bool                       m_seekInProgress = false;
+    bool                       m_updatingSeekUi = false;
     std::vector<PendingAction> m_actionHistory;
     std::vector<wxString>      m_folder1List;
     std::vector<wxString>      m_folder2List;
@@ -54,6 +77,32 @@ private:
     bool       m_folder1Confirmed  = false;
     bool       m_folder2Confirmed  = false;
     bool       m_deleteConfirmed   = false;
+
+    // --- video helpers ---
+    bool EnsurePlayerCreated();
+    void OpenCurrentVideo(const wxString& path);
+    void StopActiveVideo(bool releasePlayer);
+    void ShutdownPlayer();
+    void ResetVideoControls(const wxString& statusText,
+                            bool showControls,
+                            bool enablePlay,
+                            bool enableSeek,
+                            const wxString& playLabel);
+    void ShowVideoErrorState(const wxString& statusText);
+    void UpdateVideoSurface();
+#ifdef __WXMSW__
+    void OnVideoItemCreated(MFP_MEDIAITEM_CREATED_EVENT* evt);
+    void OnVideoPlayerError(MFP_EVENT_TYPE eventType, HRESULT hr);
+#endif
+    void OnVideoItemReady();
+    void OnVideoPlaybackEnded();
+    void OnPosTimer(wxTimerEvent&);
+    void OnPlayPause(wxCommandEvent&);
+    void OnSeekTrack(wxScrollEvent& evt);
+    void OnSeekRelease(wxScrollEvent& evt);
+    void OnSeekChanged(wxScrollEvent& evt);
+    void OnVideoPanelPaint(wxPaintEvent& evt);
+    void OnVideoPanelSize(wxSizeEvent& evt);
 
     // --- sorting helpers ---
     void BuildSortingUI();

@@ -20,8 +20,8 @@ class ImageRepository {
 public:
     ImageRepository() = default;
 
-    // Scans folder for image files (uses safe recursive walker).
-    // filespec: semicolon-separated patterns (e.g. "*.jpg;*.png"). If empty, defaults to common types.
+    // Scans folder for supported media files (uses safe recursive walker).
+    // filespec: semicolon-separated patterns (e.g. "*.jpg;*.png"). If empty, defaults to supported media types.
     // recursive: whether to descend into subfolders.
     bool BuildFromFolder(const wxString& baseFolder,
                          const wxString& filespec = wxEmptyString,
