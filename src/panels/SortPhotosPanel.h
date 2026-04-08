@@ -4,6 +4,7 @@
 #include <wx/scrolwin.h>
 #include <wx/wrapsizer.h>
 #include <wx/gauge.h>
+#include <wx/mediactrl.h>
 #include <vector>
 
 enum {
@@ -29,7 +30,7 @@ public:
 private:
     // --- sorting UI (nulled after DestroyChildren) ---
     wxStaticBitmap* m_imageBitmap    = nullptr;
-    wxButton*       m_openVideoBtn   = nullptr;
+    wxMediaCtrl*    m_mediaCtrl      = nullptr;
     wxGauge*        m_progressBar    = nullptr;
     wxStaticText*   m_progressLabel  = nullptr;
     wxStaticText*   m_imageNameLabel = nullptr;

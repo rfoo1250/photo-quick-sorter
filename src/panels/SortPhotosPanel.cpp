@@ -10,81 +10,6 @@
 #include <wx/stdpaths.h>
 #include <algorithm>
 
-#ifdef __WXMSW__
-#include <shobjidl.h>
-#endif
-
-// ─────────────────────────────────────────────
-// Video thumbnail helper (Windows Shell cache)
-// ─────────────────────────────────────────────
-
-#ifdef __WXMSW__
-// Called on the main thread — COM is initialised by wxWidgets (OleInitialize).
-// Uses GetDIBits with an explicit top-down, 32-bit format so we get a
-// normalised left→right, top→bottom BGRA buffer regardless of how the Shell
-// chose to store the HBITMAP internally (stride, orientation, DDB vs DIB).
-static wxBitmap GetVideoThumbnailBitmap(const wxString& path, int size)
-{
-    IShellItemImageFactory* pFactory = nullptr;
-    if (FAILED(SHCreateItemFromParsingName(path.wc_str(), nullptr,
-                                            IID_PPV_ARGS(&pFactory))))
-        return wxNullBitmap;
-
-    SIZE sz = { size, size };
-    HBITMAP hBmp = nullptr;
-    HRESULT hr = pFactory->GetImage(sz, SIIGBF_BIGGERSIZEOK, &hBmp);
-    pFactory->Release();
-    if (FAILED(hr) || !hBmp) return wxNullBitmap;
-
-    // Query dimensions only (works for both DDB and DIB section).
-    BITMAP bm = {};
-    if (!GetObject(hBmp, sizeof(BITMAP), &bm) || bm.bmWidth <= 0 || bm.bmHeight == 0) {
-        DeleteObject(hBmp);
-        return wxNullBitmap;
-    }
-    int w = bm.bmWidth, h = abs(bm.bmHeight);
-
-    // Ask GetDIBits for a top-down (biHeight < 0), 32-bit BGRA buffer.
-    // This normalises any internal orientation/stride the Shell may have used.
-    BITMAPINFOHEADER bih = {};
-    bih.biSize        = sizeof(BITMAPINFOHEADER);
-    bih.biWidth       = w;
-    bih.biHeight      = -h; // negative = top-down output
-    bih.biPlanes      = 1;
-    bih.biBitCount    = 32;
-    bih.biCompression = BI_RGB;
-
-    std::vector<BYTE> pixels(w * h * 4);
-    HDC hdc = ::GetDC(nullptr);
-    int rows = ::GetDIBits(hdc, hBmp, 0, h, pixels.data(),
-                            reinterpret_cast<BITMAPINFO*>(&bih), DIB_RGB_COLORS);
-    ::ReleaseDC(nullptr, hdc);
-    ::DeleteObject(hBmp);
-
-    if (rows <= 0) return wxNullBitmap;
-
-    // Convert BGRA → RGB for wxImage (stride is exactly w*4 because we asked for it).
-    wxImage img(w, h, false);
-    unsigned char* rgb = img.GetData();
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            int si = (y * w + x) * 4, di = y * w + x;
-            rgb[di*3+0] = pixels[si+2]; // R
-            rgb[di*3+1] = pixels[si+1]; // G
-            rgb[di*3+2] = pixels[si+0]; // B
-        }
-    }
-
-    if (w > size || h > size) {
-        double s = std::min((double)size / w, (double)size / h);
-        img = img.Scale(std::max(1, (int)(w * s)),
-                        std::max(1, (int)(h * s)),
-                        wxIMAGE_QUALITY_NORMAL);
-    }
-    return wxBitmap(img);
-}
-#endif // __WXMSW__
-
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
@@ -120,14 +45,11 @@ void SortPhotosPanel::BuildSortingUI()
 {
     m_imageBitmap = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
 
-    m_openVideoBtn = new wxButton(this, wxID_ANY, "Open in Player");
-    m_openVideoBtn->Hide();
-    m_openVideoBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
-        auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
-        if (!frame) return;
-        const ImageInfo* info = frame->imageRepo.GetAt(m_currentIndex);
-        if (info) wxLaunchDefaultApplication(info->path);
-    });
+    m_mediaCtrl = new wxMediaCtrl(this, wxID_ANY, wxEmptyString,
+                                   wxDefaultPosition, wxDefaultSize,
+                                   wxMC_NO_AUTORESIZE);
+    m_mediaCtrl->ShowPlayerControls(wxMEDIACTRLPLAYERCONTROLS_DEFAULT);
+    m_mediaCtrl->Hide();
 
     m_imageNameLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER | wxST_ELLIPSIZE_END);
     m_progressLabel  = new wxStaticText(this, wxID_ANY, "0/0", wxDefaultPosition, wxSize(60, -1), wxALIGN_RIGHT);
@@ -163,7 +85,7 @@ void SortPhotosPanel::BuildSortingUI()
     wxBoxSizer* imageCell = new wxBoxSizer(wxVERTICAL);
     imageCell->Add(m_imageNameLabel, 0, wxALIGN_CENTER | wxBOTTOM, 4);
     imageCell->Add(m_imageBitmap,    0, wxALIGN_CENTER);
-    imageCell->Add(m_openVideoBtn,   0, wxALIGN_CENTER | wxTOP, 8);
+    imageCell->Add(m_mediaCtrl,      1, wxEXPAND);
 
     grid->Add(m_folder1Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(imageCell,    1, wxEXPAND, 10);
@@ -346,42 +268,20 @@ void SortPhotosPanel::LoadCurrentImage()
     m_imageNameLabel->SetLabel(wxFileName(info->path).GetFullName());
 
     m_currentIsVideo = MediaUtils::IsVideoFile(info->path);
-    m_imageBitmap->Show();
+
+    if (m_mediaCtrl && m_mediaCtrl->IsShown())
+        m_mediaCtrl->Stop();
 
     if (m_currentIsVideo) {
-        // ── Video: show shell thumbnail + "Open in Player" button ────────────
-        m_openVideoBtn->Show();
+        // ── Video: hand off to wxMediaCtrl ────────────────────────────────────
+        m_imageBitmap->Hide();
+        m_mediaCtrl->Show();
         Layout();
-
-        wxSize panel = GetClientSize();
-        int btnW = m_folder1Btn->GetSize().x + 16;
-        int maxW = std::max(1, panel.x - 2 * btnW);
-        int maxH = std::max(1, (int)(panel.y * 0.70)); // leave room for the button below
-
-        // Request at the larger dimension so the shell gives us enough pixels,
-        // then scale to fit within maxW x maxH (same aspect-ratio logic as images).
-        int requestSize = std::max(64, std::max(maxW, maxH));
-
-        wxBitmap thumb;
-#ifdef __WXMSW__
-        thumb = GetVideoThumbnailBitmap(info->path, requestSize);
-#endif
-        if (thumb.IsOk()) {
-            wxImage img = thumb.ConvertToImage();
-            double scaleX = (double)maxW / img.GetWidth();
-            double scaleY = (double)maxH / img.GetHeight();
-            double scale  = std::min(scaleX, scaleY);
-            if (scale < 1.0)
-                img = img.Scale(std::max(1, (int)(img.GetWidth()  * scale)),
-                                std::max(1, (int)(img.GetHeight() * scale)),
-                                wxIMAGE_QUALITY_HIGH);
-            m_imageBitmap->SetBitmap(wxBitmap(img));
-        } else {
-            m_imageBitmap->SetBitmap(wxNullBitmap);
-        }
+        m_mediaCtrl->Load(info->path);
     } else {
         // ── Image: scale and display with wxStaticBitmap ─────────────────────
-        m_openVideoBtn->Hide();
+        m_mediaCtrl->Hide();
+        m_imageBitmap->Show();
 
         wxImage img(info->path, wxBITMAP_TYPE_ANY);
         if (img.IsOk()) {
@@ -530,7 +430,7 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     // Destroy sorting UI and null all sorting-UI pointers
     DestroyChildren();
     m_imageBitmap    = nullptr;
-    m_openVideoBtn   = nullptr;
+    m_mediaCtrl      = nullptr;
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
@@ -824,7 +724,7 @@ void SortPhotosPanel::ShowDoneState()
     m_inReview = true;
     DestroyChildren();
     m_imageBitmap    = nullptr;
-    m_openVideoBtn   = nullptr;
+    m_mediaCtrl      = nullptr;
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
@@ -865,6 +765,7 @@ void SortPhotosPanel::OnSize(wxSizeEvent& evt)
 {
     evt.Skip();
     if (m_inReview) return;
+    if (m_currentIsVideo) return; // wxMediaCtrl resizes itself via wxEXPAND
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
     if (frame && frame->imageRepo.GetCount() > 0 && IsShown() && m_imageBitmap)
         LoadCurrentImage();
