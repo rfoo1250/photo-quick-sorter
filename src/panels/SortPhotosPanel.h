@@ -38,10 +38,16 @@ private:
     wxButton*       m_saveBtn     = nullptr;
     wxButton*       m_deleteBtn   = nullptr;
     wxButton*       m_undoBtn     = nullptr;
+    wxButton*       m_ruleOfThirdsBtn = nullptr;
 
     // --- session state ---
     size_t                     m_currentIndex   = 0;
     bool                       m_currentIsVideo = false;
+    bool                       m_showRuleOfThirds = false;
+    wxString                   m_cachedImagePath;
+    wxSize                     m_cachedImageBounds;
+    wxBitmap                   m_cachedPlainBitmap;
+    wxBitmap                   m_cachedGridBitmap;
     std::vector<PendingAction> m_actionHistory;
     std::vector<wxString>      m_folder1List;
     std::vector<wxString>      m_folder2List;
@@ -61,6 +67,8 @@ private:
     void BuildSortingUI();
     void LoadCurrentImage();
     void SetButtonsEnabled(bool enabled);
+    void UpdateGridToggleButton();
+    void InvalidateImageRenderCache();
     void ShowDoneState();
     void RecordAction(SortAction type);
     void PersistList(const std::vector<wxString>& list, const wxString& filename);
@@ -77,6 +85,9 @@ private:
 
     // --- helpers ---
     wxBitmap LoadKeycap(const wxString& filename, int size = 28) const;
+    wxImage ApplyRuleOfThirdsOverlay(wxImage img) const;
+    wxSize GetImageDisplayBounds() const;
+    wxBitmap GetOrCreateImageBitmap(const wxString& path, const wxSize& available, bool withGrid);
 
     // --- event handlers ---
     void OnFolder1(wxCommandEvent& evt);
@@ -84,6 +95,7 @@ private:
     void OnSave(wxCommandEvent& evt);
     void OnDelete(wxCommandEvent& evt);
     void OnUndo(wxCommandEvent& evt);
+    void OnToggleRuleOfThirds(wxCommandEvent& evt);
     void OnStepConfirm(wxCommandEvent& evt);
     void OnStepSkip(wxCommandEvent& evt);
     void OnSize(wxSizeEvent& evt);

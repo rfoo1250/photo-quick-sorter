@@ -89,6 +89,28 @@ static wxBitmap GetVideoThumbnailBitmap(const wxString& path, int size)
 // Helpers
 // ─────────────────────────────────────────────
 
+namespace {
+
+void BlendImagePixel(wxImage& img, int x, int y,
+                     unsigned char r, unsigned char g, unsigned char b,
+                     unsigned char alpha)
+{
+    if (x < 0 || y < 0 || x >= img.GetWidth() || y >= img.GetHeight())
+        return;
+
+    unsigned char* data = img.GetData();
+    if (!data) return;
+
+    const int idx = (y * img.GetWidth() + x) * 3;
+    const int invAlpha = 255 - alpha;
+
+    data[idx + 0] = static_cast<unsigned char>((data[idx + 0] * invAlpha + r * alpha) / 255);
+    data[idx + 1] = static_cast<unsigned char>((data[idx + 1] * invAlpha + g * alpha) / 255);
+    data[idx + 2] = static_cast<unsigned char>((data[idx + 2] * invAlpha + b * alpha) / 255);
+}
+
+}
+
 wxBitmap SortPhotosPanel::LoadKeycap(const wxString& filename, int size) const
 {
     wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
@@ -138,18 +160,22 @@ void SortPhotosPanel::BuildSortingUI()
     m_saveBtn    = new wxButton(this, ID_SORT_SAVE,    "Save");
     m_deleteBtn  = new wxButton(this, ID_SORT_DELETE,  "Delete");
     m_undoBtn    = new wxButton(this, ID_SORT_UNDO,    "Undo");
+    m_ruleOfThirdsBtn = new wxButton(this, wxID_ANY, "Grid Off");
 
     wxBitmap icLeft  = LoadKeycap("cursor-left.png");
     wxBitmap icRight = LoadKeycap("cursor-right.png");
     wxBitmap icUp    = LoadKeycap("cursor-up.png");
     wxBitmap icDown  = LoadKeycap("cursor-down.png");
     wxBitmap icZ     = LoadKeycap("z.png");
+    wxBitmap icG     = LoadKeycap("g.png");
 
     if (icLeft.IsOk())  { m_folder1Btn->SetBitmap(icLeft);  m_folder1Btn->SetBitmapPosition(wxLEFT);  }
     if (icRight.IsOk()) { m_folder2Btn->SetBitmap(icRight); m_folder2Btn->SetBitmapPosition(wxRIGHT); }
     if (icUp.IsOk())    { m_saveBtn->SetBitmap(icUp);       m_saveBtn->SetBitmapPosition(wxTOP);      }
     if (icDown.IsOk())  { m_deleteBtn->SetBitmap(icDown);   m_deleteBtn->SetBitmapPosition(wxBOTTOM); }
     if (icZ.IsOk())     { m_undoBtn->SetBitmap(icZ);        m_undoBtn->SetBitmapPosition(wxLEFT);     }
+    if (icG.IsOk())     { m_ruleOfThirdsBtn->SetBitmap(icG); m_ruleOfThirdsBtn->SetBitmapPosition(wxLEFT); }
+    m_ruleOfThirdsBtn->SetToolTip("Toggle a rule-of-thirds grid on the current image");
 
 
     wxFlexGridSizer* grid = new wxFlexGridSizer(3, 3, 0, 0);
@@ -169,7 +195,7 @@ void SortPhotosPanel::BuildSortingUI()
     grid->Add(imageCell,    1, wxEXPAND, 10);
     grid->Add(m_folder2Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
 
-    grid->Add(0, 0);
+    grid->Add(m_ruleOfThirdsBtn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(m_deleteBtn,  0, wxALL | wxALIGN_CENTER, 8);
     grid->Add(0, 0);
 
@@ -187,6 +213,9 @@ void SortPhotosPanel::BuildSortingUI()
     m_saveBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnSave,    this);
     m_deleteBtn ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnDelete,  this);
     m_undoBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnUndo,    this);
+    m_ruleOfThirdsBtn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnToggleRuleOfThirds, this);
+
+    UpdateGridToggleButton();
 
     SetButtonsEnabled(false);
 }
@@ -234,6 +263,7 @@ void SortPhotosPanel::RefreshData()
     m_folder1List.clear();
     m_folder2List.clear();
     m_deleteList.clear();
+    InvalidateImageRenderCache();
 
     // Crash recovery: check for leftover txt files from a previous session
     CheckForPendingSession();
@@ -328,6 +358,100 @@ void SortPhotosPanel::CheckForPendingSession()
 // Image display
 // ─────────────────────────────────────────────
 
+wxImage SortPhotosPanel::ApplyRuleOfThirdsOverlay(wxImage img) const
+{
+    if (!img.IsOk()) return img;
+
+    const int w = img.GetWidth();
+    const int h = img.GetHeight();
+    if (w < 3 || h < 3) return img;
+
+    const int thickness = std::max(1, std::min(w, h) / 320);
+    const int xLines[] = { w / 3, (2 * w) / 3 };
+    const int yLines[] = { h / 3, (2 * h) / 3 };
+
+    for (int lineX : xLines) {
+        for (int offset = 0; offset < thickness; ++offset) {
+            const int x = lineX + offset - thickness / 2;
+            for (int y = 0; y < h; ++y) {
+                BlendImagePixel(img, x, y, 255, 255, 255, 128);
+            }
+        }
+    }
+
+    for (int lineY : yLines) {
+        for (int offset = 0; offset < thickness; ++offset) {
+            const int y = lineY + offset - thickness / 2;
+            for (int x = 0; x < w; ++x) {
+                BlendImagePixel(img, x, y, 255, 255, 255, 128);
+            }
+        }
+    }
+
+    return img;
+}
+
+wxSize SortPhotosPanel::GetImageDisplayBounds() const
+{
+    wxSize panel = GetClientSize();
+    int btnW = m_folder1Btn ? (m_folder1Btn->GetSize().x + 16) : 0;
+    int maxW = std::max(1, panel.x - 2 * btnW);
+    int maxH = std::max(1, (int)(panel.y * 0.75));
+    return wxSize(maxW, maxH);
+}
+
+void SortPhotosPanel::InvalidateImageRenderCache()
+{
+    m_cachedImagePath.clear();
+    m_cachedImageBounds = wxDefaultSize;
+    m_cachedPlainBitmap = wxNullBitmap;
+    m_cachedGridBitmap = wxNullBitmap;
+}
+
+wxBitmap SortPhotosPanel::GetOrCreateImageBitmap(const wxString& path, const wxSize& available, bool withGrid)
+{
+    const bool cacheMatches = m_cachedImagePath == path && m_cachedImageBounds == available;
+    if (!cacheMatches)
+        InvalidateImageRenderCache();
+
+    if (m_cachedImagePath.IsEmpty()) {
+        m_cachedImagePath = path;
+        m_cachedImageBounds = available;
+    }
+
+    if (!m_cachedPlainBitmap.IsOk()) {
+        wxImage img(path, wxBITMAP_TYPE_ANY);
+        if (!img.IsOk()) {
+            LOG_WARN("Could not load image: %s", path);
+            return wxNullBitmap;
+        }
+
+        if (available.x > 1 && available.y > 1) {
+            double scaleX = (double)available.x / img.GetWidth();
+            double scaleY = (double)available.y / img.GetHeight();
+            double scale  = std::min(scaleX, scaleY);
+            if (scale < 1.0)
+                img = img.Scale(std::max(1, (int)(img.GetWidth() * scale)),
+                                std::max(1, (int)(img.GetHeight() * scale)),
+                                wxIMAGE_QUALITY_HIGH);
+        }
+
+        m_cachedPlainBitmap = wxBitmap(img);
+    }
+
+    if (!withGrid)
+        return m_cachedPlainBitmap;
+
+    if (!m_cachedGridBitmap.IsOk()) {
+        wxImage gridImg = m_cachedPlainBitmap.ConvertToImage();
+        if (!gridImg.IsOk())
+            return wxNullBitmap;
+        m_cachedGridBitmap = wxBitmap(ApplyRuleOfThirdsOverlay(gridImg));
+    }
+
+    return m_cachedGridBitmap;
+}
+
 void SortPhotosPanel::LoadCurrentImage()
 {
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
@@ -349,6 +473,7 @@ void SortPhotosPanel::LoadCurrentImage()
     m_imageBitmap->Show();
 
     if (m_currentIsVideo) {
+        InvalidateImageRenderCache();
         // ── Video: show shell thumbnail + "Open in Player" button ────────────
         m_openVideoBtn->Show();
         Layout();
@@ -382,34 +507,13 @@ void SortPhotosPanel::LoadCurrentImage()
     } else {
         // ── Image: scale and display with wxStaticBitmap ─────────────────────
         m_openVideoBtn->Hide();
-
-        wxImage img(info->path, wxBITMAP_TYPE_ANY);
-        if (img.IsOk()) {
-            Layout();
-            wxSize panel = GetClientSize();
-            // Available width: panel minus both side button columns + their margins
-            int btnW = m_folder1Btn->GetSize().x + 16;
-            int maxW = panel.x - 2 * btnW;
-            // Available height: 75% of panel height
-            int maxH = (int)(panel.y * 0.75);
-            wxSize available(std::max(maxW, 1), std::max(maxH, 1));
-            if (available.x > 1 && available.y > 1) {
-                double scaleX = (double)available.x / img.GetWidth();
-                double scaleY = (double)available.y / img.GetHeight();
-                double scale  = std::min(scaleX, scaleY);
-                if (scale < 1.0)
-                    img = img.Scale((int)(img.GetWidth() * scale),
-                                    (int)(img.GetHeight() * scale),
-                                    wxIMAGE_QUALITY_HIGH);
-            }
-            m_imageBitmap->SetBitmap(wxBitmap(img));
-        } else {
-            m_imageBitmap->SetBitmap(wxNullBitmap);
-            LOG_WARN("Could not load image: %s", info->path);
-        }
+        Layout();
+        wxBitmap bitmap = GetOrCreateImageBitmap(info->path, GetImageDisplayBounds(), m_showRuleOfThirds);
+        m_imageBitmap->SetBitmap(bitmap);
     }
 
     SetButtonsEnabled(true);
+    UpdateGridToggleButton();
     Layout();
 }
 
@@ -539,6 +643,8 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     m_saveBtn     = nullptr;
     m_deleteBtn   = nullptr;
     m_undoBtn     = nullptr;
+    m_ruleOfThirdsBtn = nullptr;
+    InvalidateImageRenderCache();
 
     AdvanceReviewStep();
 }
@@ -806,6 +912,16 @@ void SortPhotosPanel::OnDelete(wxCommandEvent& WXUNUSED(evt))
     RecordAction(SortAction::Delete);
 }
 
+void SortPhotosPanel::OnToggleRuleOfThirds(wxCommandEvent& WXUNUSED(evt))
+{
+    if (!m_ruleOfThirdsBtn || !m_ruleOfThirdsBtn->IsEnabled())
+        return;
+
+    m_showRuleOfThirds = !m_showRuleOfThirds;
+    UpdateGridToggleButton();
+    LoadCurrentImage();
+}
+
 // ─────────────────────────────────────────────
 // Utility
 // ─────────────────────────────────────────────
@@ -817,6 +933,29 @@ void SortPhotosPanel::SetButtonsEnabled(bool enabled)
     if (m_saveBtn)    m_saveBtn   ->Enable(enabled);
     if (m_deleteBtn)  m_deleteBtn ->Enable(enabled);
     if (m_undoBtn)    m_undoBtn   ->Enable(enabled);
+    if (m_ruleOfThirdsBtn) m_ruleOfThirdsBtn->Enable(enabled && !m_currentIsVideo);
+    UpdateGridToggleButton();
+}
+
+void SortPhotosPanel::UpdateGridToggleButton()
+{
+    if (!m_ruleOfThirdsBtn) return;
+
+    m_ruleOfThirdsBtn->SetLabel(m_showRuleOfThirds ? "Grid On" : "Grid Off");
+    if (!m_ruleOfThirdsBtn->IsEnabled()) {
+        m_ruleOfThirdsBtn->SetBackgroundColour(wxNullColour);
+        m_ruleOfThirdsBtn->SetForegroundColour(wxNullColour);
+        return;
+    }
+
+    if (m_showRuleOfThirds) {
+        m_ruleOfThirdsBtn->SetBackgroundColour(wxColour(70, 120, 70));
+        m_ruleOfThirdsBtn->SetForegroundColour(*wxWHITE);
+    } else {
+        m_ruleOfThirdsBtn->SetBackgroundColour(wxNullColour);
+        m_ruleOfThirdsBtn->SetForegroundColour(wxNullColour);
+    }
+    m_ruleOfThirdsBtn->Refresh();
 }
 
 void SortPhotosPanel::ShowDoneState()
@@ -828,7 +967,8 @@ void SortPhotosPanel::ShowDoneState()
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
-    m_folder1Btn = m_folder2Btn = m_saveBtn = m_deleteBtn = m_undoBtn = nullptr;
+    m_folder1Btn = m_folder2Btn = m_saveBtn = m_deleteBtn = m_undoBtn = m_ruleOfThirdsBtn = nullptr;
+    InvalidateImageRenderCache();
 
     Freeze();
     wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
@@ -893,16 +1033,28 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
     }
 
     if (!m_folder1Btn || !m_folder1Btn->IsEnabled()) {
+        if (m_ruleOfThirdsBtn && m_ruleOfThirdsBtn->IsEnabled()) {
+            const int key = evt.GetKeyCode();
+            if (key == 'G' || key == 'g') {
+                wxCommandEvent dummy;
+                OnToggleRuleOfThirds(dummy);
+                return;
+            }
+        }
         evt.Skip();
         return;
     }
+
     wxCommandEvent dummy;
     switch (evt.GetKeyCode()) {
         case WXK_LEFT:  OnFolder1(dummy); break;
         case WXK_RIGHT: OnFolder2(dummy); break;
         case WXK_UP:    OnSave(dummy);    break;
         case WXK_DOWN:  OnDelete(dummy);  break;
-        case 'Z':       OnUndo(dummy);    break;
+        case 'Z':
+        case 'z':       OnUndo(dummy);    break;
+        case 'G':
+        case 'g':       OnToggleRuleOfThirds(dummy); break;
         default:        evt.Skip();       break;
     }
 }
