@@ -28,6 +28,7 @@ public:
 
 private:
     // --- sorting UI (nulled after DestroyChildren) ---
+    wxPanel*        m_imageViewport   = nullptr;
     wxStaticBitmap* m_imageBitmap    = nullptr;
     wxButton*       m_openVideoBtn   = nullptr;
     wxGauge*        m_progressBar    = nullptr;
@@ -39,15 +40,29 @@ private:
     wxButton*       m_deleteBtn   = nullptr;
     wxButton*       m_undoBtn     = nullptr;
     wxButton*       m_ruleOfThirdsBtn = nullptr;
+    wxButton*       m_zoomInBtn   = nullptr;
+    wxButton*       m_zoomOutBtn  = nullptr;
+    wxStaticBitmap* m_zoomInShiftHint = nullptr;
+    wxStaticBitmap* m_zoomOutShiftHint = nullptr;
 
     // --- session state ---
     size_t                     m_currentIndex   = 0;
     bool                       m_currentIsVideo = false;
     bool                       m_showRuleOfThirds = false;
+    double                     m_imageZoom = 1.0;
+    wxPoint2DDouble            m_imageOffset;
+    wxString                   m_activeImagePath;
     wxString                   m_cachedImagePath;
     wxSize                     m_cachedImageBounds;
+    double                     m_cachedZoomFactor = 1.0;
+    wxPoint2DDouble            m_cachedImageOffset;
+    wxImage                    m_cachedSourceImage;
     wxBitmap                   m_cachedPlainBitmap;
     wxBitmap                   m_cachedGridBitmap;
+    wxRect                     m_visibleImageRect;
+    bool                       m_isDraggingImage = false;
+    wxPoint                    m_imageDragStart;
+    wxPoint2DDouble            m_imageDragStartOffset;
     std::vector<PendingAction> m_actionHistory;
     std::vector<wxString>      m_folder1List;
     std::vector<wxString>      m_folder2List;
@@ -66,8 +81,15 @@ private:
     // --- sorting helpers ---
     void BuildSortingUI();
     void LoadCurrentImage();
+    bool RefreshCurrentImageBitmap();
     void SetButtonsEnabled(bool enabled);
     void UpdateGridToggleButton();
+    void UpdateZoomButtons();
+    void UpdateImageViewportLayout();
+    bool IsAtOriginalZoom() const;
+    void ResetImageZoom();
+    void ApplyZoomStep(int direction, const wxPoint* anchor = nullptr);
+    void EndImageDrag();
     void InvalidateImageRenderCache();
     void ShowDoneState();
     void RecordAction(SortAction type);
@@ -96,6 +118,13 @@ private:
     void OnDelete(wxCommandEvent& evt);
     void OnUndo(wxCommandEvent& evt);
     void OnToggleRuleOfThirds(wxCommandEvent& evt);
+    void OnZoomIn(wxCommandEvent& evt);
+    void OnZoomOut(wxCommandEvent& evt);
+    void OnImageMouseWheel(wxMouseEvent& evt);
+    void OnImageLeftDown(wxMouseEvent& evt);
+    void OnImageLeftUp(wxMouseEvent& evt);
+    void OnImageMouseMove(wxMouseEvent& evt);
+    void OnImageCaptureLost(wxMouseCaptureLostEvent& evt);
     void OnStepConfirm(wxCommandEvent& evt);
     void OnStepSkip(wxCommandEvent& evt);
     void OnSize(wxSizeEvent& evt);

@@ -9,6 +9,7 @@
 #include <wx/textfile.h>
 #include <wx/stdpaths.h>
 #include <algorithm>
+#include <cmath>
 
 #ifdef __WXMSW__
 #include <shobjidl.h>
@@ -91,6 +92,11 @@ static wxBitmap GetVideoThumbnailBitmap(const wxString& path, int size)
 
 namespace {
 
+constexpr double ZOOM_MIN = 1.0;
+constexpr double ZOOM_MAX = 8.0;
+constexpr double ZOOM_STEP = 1.2;
+constexpr double ZOOM_EPSILON = 0.0001;
+
 void BlendImagePixel(wxImage& img, int x, int y,
                      unsigned char r, unsigned char g, unsigned char b,
                      unsigned char alpha)
@@ -107,6 +113,55 @@ void BlendImagePixel(wxImage& img, int x, int y,
     data[idx + 0] = static_cast<unsigned char>((data[idx + 0] * invAlpha + r * alpha) / 255);
     data[idx + 1] = static_cast<unsigned char>((data[idx + 1] * invAlpha + g * alpha) / 255);
     data[idx + 2] = static_cast<unsigned char>((data[idx + 2] * invAlpha + b * alpha) / 255);
+}
+
+bool NearlyEqual(double lhs, double rhs)
+{
+    return std::abs(lhs - rhs) < ZOOM_EPSILON;
+}
+
+wxSize CalculateRenderedSize(const wxSize& source, const wxSize& viewport, double zoom)
+{
+    if (source.x <= 0 || source.y <= 0 || viewport.x <= 0 || viewport.y <= 0)
+        return wxSize(1, 1);
+
+    const double baseScale = std::min(1.0,
+        std::min((double)viewport.x / source.x, (double)viewport.y / source.y));
+    const double renderScale = std::max(0.01, baseScale * zoom);
+
+    return wxSize(
+        std::max(1, (int)std::lround(source.x * renderScale)),
+        std::max(1, (int)std::lround(source.y * renderScale)));
+}
+
+wxPoint2DDouble ClampImageOffsetToViewport(const wxSize& viewport,
+                                           const wxSize& rendered,
+                                           const wxPoint2DDouble& desired)
+{
+    wxPoint2DDouble clamped = desired;
+
+    if (rendered.x <= viewport.x) {
+        clamped.m_x = (viewport.x - rendered.x) / 2.0;
+    } else {
+        clamped.m_x = std::clamp(clamped.m_x, (double)viewport.x - rendered.x, 0.0);
+    }
+
+    if (rendered.y <= viewport.y) {
+        clamped.m_y = (viewport.y - rendered.y) / 2.0;
+    } else {
+        clamped.m_y = std::clamp(clamped.m_y, (double)viewport.y - rendered.y, 0.0);
+    }
+
+    return clamped;
+}
+
+wxRect BuildImageRect(const wxSize& rendered, const wxPoint2DDouble& offset)
+{
+    return wxRect(
+        (int)std::lround(offset.m_x),
+        (int)std::lround(offset.m_y),
+        rendered.x,
+        rendered.y);
 }
 
 }
@@ -140,7 +195,22 @@ SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
 
 void SortPhotosPanel::BuildSortingUI()
 {
-    m_imageBitmap = new wxStaticBitmap(this, wxID_ANY, wxNullBitmap);
+    m_imageViewport = new wxPanel(this, wxID_ANY);
+    m_imageBitmap = new wxStaticBitmap(m_imageViewport, wxID_ANY, wxNullBitmap);
+    m_imageBitmap->Bind(wxEVT_MOUSEWHEEL, &SortPhotosPanel::OnImageMouseWheel, this);
+    m_imageBitmap->Bind(wxEVT_LEFT_DOWN, &SortPhotosPanel::OnImageLeftDown, this);
+    m_imageBitmap->Bind(wxEVT_LEFT_UP, &SortPhotosPanel::OnImageLeftUp, this);
+    m_imageBitmap->Bind(wxEVT_MOTION, &SortPhotosPanel::OnImageMouseMove, this);
+    m_imageBitmap->Bind(wxEVT_MOUSE_CAPTURE_LOST, &SortPhotosPanel::OnImageCaptureLost, this);
+
+    m_zoomInBtn = new wxButton(m_imageViewport, wxID_ANY, "");
+    m_zoomOutBtn = new wxButton(m_imageViewport, wxID_ANY, "");
+    m_zoomInShiftHint = new wxStaticBitmap(m_imageViewport, wxID_ANY, wxNullBitmap);
+    m_zoomOutShiftHint = new wxStaticBitmap(m_imageViewport, wxID_ANY, wxNullBitmap);
+    m_zoomInBtn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnZoomIn, this);
+    m_zoomOutBtn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnZoomOut, this);
+    m_zoomInBtn->SetToolTip("Zoom in (Shift + = / +)");
+    m_zoomOutBtn->SetToolTip("Zoom out (Shift + - / -)");
 
     m_openVideoBtn = new wxButton(this, wxID_ANY, "Open in Player");
     m_openVideoBtn->Hide();
@@ -168,6 +238,9 @@ void SortPhotosPanel::BuildSortingUI()
     wxBitmap icDown  = LoadKeycap("cursor-down.png");
     wxBitmap icZ     = LoadKeycap("z.png");
     wxBitmap icG     = LoadKeycap("g.png");
+    wxBitmap icShift = LoadKeycap("shift.png");
+    wxBitmap icPlus  = LoadKeycap("equals-plus.png");
+    wxBitmap icMinus = LoadKeycap("minus.png");
 
     if (icLeft.IsOk())  { m_folder1Btn->SetBitmap(icLeft);  m_folder1Btn->SetBitmapPosition(wxLEFT);  }
     if (icRight.IsOk()) { m_folder2Btn->SetBitmap(icRight); m_folder2Btn->SetBitmapPosition(wxRIGHT); }
@@ -175,6 +248,14 @@ void SortPhotosPanel::BuildSortingUI()
     if (icDown.IsOk())  { m_deleteBtn->SetBitmap(icDown);   m_deleteBtn->SetBitmapPosition(wxBOTTOM); }
     if (icZ.IsOk())     { m_undoBtn->SetBitmap(icZ);        m_undoBtn->SetBitmapPosition(wxLEFT);     }
     if (icG.IsOk())     { m_ruleOfThirdsBtn->SetBitmap(icG); m_ruleOfThirdsBtn->SetBitmapPosition(wxLEFT); }
+    if (icShift.IsOk()) {
+        m_zoomInShiftHint->SetBitmap(icShift);
+        m_zoomOutShiftHint->SetBitmap(icShift);
+        m_zoomInShiftHint->SetToolTip("Shift + =");
+        m_zoomOutShiftHint->SetToolTip("Shift + -");
+    }
+    if (icPlus.IsOk())  { m_zoomInBtn->SetBitmap(icPlus);   m_zoomInBtn->SetBitmapPosition(wxLEFT);   }
+    if (icMinus.IsOk()) { m_zoomOutBtn->SetBitmap(icMinus); m_zoomOutBtn->SetBitmapPosition(wxLEFT);  }
     m_ruleOfThirdsBtn->SetToolTip("Toggle a rule-of-thirds grid on the current image");
 
 
@@ -188,7 +269,7 @@ void SortPhotosPanel::BuildSortingUI()
 
     wxBoxSizer* imageCell = new wxBoxSizer(wxVERTICAL);
     imageCell->Add(m_imageNameLabel, 0, wxALIGN_CENTER | wxBOTTOM, 4);
-    imageCell->Add(m_imageBitmap,    0, wxALIGN_CENTER);
+    imageCell->Add(m_imageViewport,  1, wxEXPAND);
     imageCell->Add(m_openVideoBtn,   0, wxALIGN_CENTER | wxTOP, 8);
 
     grid->Add(m_folder1Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
@@ -216,6 +297,7 @@ void SortPhotosPanel::BuildSortingUI()
     m_ruleOfThirdsBtn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnToggleRuleOfThirds, this);
 
     UpdateGridToggleButton();
+    UpdateZoomButtons();
 
     SetButtonsEnabled(false);
 }
@@ -263,6 +345,8 @@ void SortPhotosPanel::RefreshData()
     m_folder1List.clear();
     m_folder2List.clear();
     m_deleteList.clear();
+    m_activeImagePath.clear();
+    ResetImageZoom();
     InvalidateImageRenderCache();
 
     // Crash recovery: check for leftover txt files from a previous session
@@ -393,6 +477,12 @@ wxImage SortPhotosPanel::ApplyRuleOfThirdsOverlay(wxImage img) const
 
 wxSize SortPhotosPanel::GetImageDisplayBounds() const
 {
+    if (m_imageViewport) {
+        wxSize viewport = m_imageViewport->GetClientSize();
+        if (viewport.x > 1 && viewport.y > 1)
+            return viewport;
+    }
+
     wxSize panel = GetClientSize();
     int btnW = m_folder1Btn ? (m_folder1Btn->GetSize().x + 16) : 0;
     int maxW = std::max(1, panel.x - 2 * btnW);
@@ -404,52 +494,279 @@ void SortPhotosPanel::InvalidateImageRenderCache()
 {
     m_cachedImagePath.clear();
     m_cachedImageBounds = wxDefaultSize;
+    m_cachedZoomFactor = 1.0;
+    m_cachedImageOffset = wxPoint2DDouble(0.0, 0.0);
+    m_cachedSourceImage = wxNullImage;
     m_cachedPlainBitmap = wxNullBitmap;
     m_cachedGridBitmap = wxNullBitmap;
+    m_visibleImageRect = wxRect();
 }
 
 wxBitmap SortPhotosPanel::GetOrCreateImageBitmap(const wxString& path, const wxSize& available, bool withGrid)
 {
-    const bool cacheMatches = m_cachedImagePath == path && m_cachedImageBounds == available;
-    if (!cacheMatches)
-        InvalidateImageRenderCache();
+    if (available.x <= 0 || available.y <= 0)
+        return wxNullBitmap;
 
-    if (m_cachedImagePath.IsEmpty()) {
+    if (m_cachedImagePath != path) {
+        InvalidateImageRenderCache();
         m_cachedImagePath = path;
-        m_cachedImageBounds = available;
     }
 
-    if (!m_cachedPlainBitmap.IsOk()) {
-        wxImage img(path, wxBITMAP_TYPE_ANY);
-        if (!img.IsOk()) {
+    if (!m_cachedSourceImage.IsOk()) {
+        m_cachedSourceImage.LoadFile(path, wxBITMAP_TYPE_ANY);
+        if (!m_cachedSourceImage.IsOk()) {
             LOG_WARN("Could not load image: %s", path);
             return wxNullBitmap;
         }
+    }
 
-        if (available.x > 1 && available.y > 1) {
-            double scaleX = (double)available.x / img.GetWidth();
-            double scaleY = (double)available.y / img.GetHeight();
-            double scale  = std::min(scaleX, scaleY);
-            if (scale < 1.0)
-                img = img.Scale(std::max(1, (int)(img.GetWidth() * scale)),
-                                std::max(1, (int)(img.GetHeight() * scale)),
-                                wxIMAGE_QUALITY_HIGH);
+    const wxSize sourceSize(m_cachedSourceImage.GetWidth(), m_cachedSourceImage.GetHeight());
+    const wxSize renderedSize = CalculateRenderedSize(sourceSize, available, m_imageZoom);
+    const wxPoint2DDouble clampedOffset = ClampImageOffsetToViewport(available, renderedSize, m_imageOffset);
+    m_imageOffset = clampedOffset;
+
+    wxRect imageRect = BuildImageRect(renderedSize, clampedOffset);
+    wxRect viewportRect(wxPoint(0, 0), available);
+    wxRect visibleRect = imageRect;
+    visibleRect.Intersect(viewportRect);
+    m_visibleImageRect = visibleRect;
+
+    const bool renderMatches = m_cachedImageBounds == available &&
+                               NearlyEqual(m_cachedZoomFactor, m_imageZoom) &&
+                               NearlyEqual(m_cachedImageOffset.m_x, clampedOffset.m_x) &&
+                               NearlyEqual(m_cachedImageOffset.m_y, clampedOffset.m_y);
+    if (!renderMatches) {
+        m_cachedImageBounds = available;
+        m_cachedZoomFactor = m_imageZoom;
+        m_cachedImageOffset = clampedOffset;
+        m_cachedPlainBitmap = wxNullBitmap;
+        m_cachedGridBitmap = wxNullBitmap;
+    }
+
+    auto renderViewportFrame = [&](bool drawGrid) -> wxBitmap {
+        wxBitmap frame(std::max(1, available.x), std::max(1, available.y), 32);
+        wxMemoryDC dc(frame);
+
+        wxColour bg = m_imageViewport ? m_imageViewport->GetBackgroundColour() : wxNullColour;
+        if (!bg.IsOk()) bg = GetBackgroundColour();
+        if (!bg.IsOk()) bg = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE);
+        dc.SetBackground(wxBrush(bg));
+        dc.Clear();
+
+        if (!visibleRect.IsEmpty()) {
+            int drawX = visibleRect.x;
+            int drawY = visibleRect.y;
+            int drawW = visibleRect.width;
+            int drawH = visibleRect.height;
+
+            wxImage drawImage;
+            if (visibleRect == imageRect) {
+                drawImage = m_cachedSourceImage.Copy();
+            } else {
+                const double scaleX = (double)sourceSize.x / renderedSize.x;
+                const double scaleY = (double)sourceSize.y / renderedSize.y;
+
+                const int srcX = std::clamp((int)std::floor((visibleRect.x - imageRect.x) * scaleX), 0, sourceSize.x - 1);
+                const int srcY = std::clamp((int)std::floor((visibleRect.y - imageRect.y) * scaleY), 0, sourceSize.y - 1);
+                const int srcRight = std::clamp((int)std::ceil((visibleRect.GetRight() + 1 - imageRect.x) * scaleX), srcX + 1, sourceSize.x);
+                const int srcBottom = std::clamp((int)std::ceil((visibleRect.GetBottom() + 1 - imageRect.y) * scaleY), srcY + 1, sourceSize.y);
+
+                drawImage = m_cachedSourceImage.GetSubImage(
+                    wxRect(srcX, srcY, srcRight - srcX, srcBottom - srcY));
+            }
+
+            if (drawImage.IsOk() &&
+                (drawImage.GetWidth() != drawW || drawImage.GetHeight() != drawH)) {
+                drawImage = drawImage.Scale(drawW, drawH, wxIMAGE_QUALITY_HIGH);
+            }
+
+            if (drawGrid && IsAtOriginalZoom() && visibleRect == imageRect && drawImage.IsOk()) {
+                drawImage = ApplyRuleOfThirdsOverlay(drawImage);
+            }
+
+            if (drawImage.IsOk()) {
+                dc.DrawBitmap(wxBitmap(drawImage), drawX, drawY, false);
+            }
         }
 
-        m_cachedPlainBitmap = wxBitmap(img);
-    }
+        dc.SelectObject(wxNullBitmap);
+        return frame;
+    };
 
-    if (!withGrid)
+    const bool allowGrid = withGrid && IsAtOriginalZoom();
+
+    if (!m_cachedPlainBitmap.IsOk())
+        m_cachedPlainBitmap = renderViewportFrame(false);
+
+    if (!allowGrid)
         return m_cachedPlainBitmap;
 
-    if (!m_cachedGridBitmap.IsOk()) {
-        wxImage gridImg = m_cachedPlainBitmap.ConvertToImage();
-        if (!gridImg.IsOk())
-            return wxNullBitmap;
-        m_cachedGridBitmap = wxBitmap(ApplyRuleOfThirdsOverlay(gridImg));
-    }
+    if (!m_cachedGridBitmap.IsOk())
+        m_cachedGridBitmap = renderViewportFrame(true);
 
     return m_cachedGridBitmap;
+}
+
+void SortPhotosPanel::UpdateZoomButtons()
+{
+    if (!m_zoomInBtn || !m_zoomOutBtn) return;
+
+    const bool hasImage = m_imageBitmap && m_imageBitmap->GetBitmap().IsOk();
+    const bool sortingReady = m_folder1Btn && m_folder1Btn->IsEnabled();
+    const bool showZoom = !m_inReview && !m_currentIsVideo && hasImage && sortingReady;
+    m_zoomInBtn->Show(showZoom);
+    m_zoomOutBtn->Show(showZoom);
+    m_zoomInBtn->Enable(showZoom && m_imageZoom < ZOOM_MAX);
+    m_zoomOutBtn->Enable(showZoom && !IsAtOriginalZoom());
+    if (m_zoomInShiftHint)
+        m_zoomInShiftHint->Show(showZoom && m_zoomInShiftHint->GetBitmap().IsOk());
+    if (m_zoomOutShiftHint)
+        m_zoomOutShiftHint->Show(showZoom && m_zoomOutShiftHint->GetBitmap().IsOk());
+}
+
+void SortPhotosPanel::UpdateImageViewportLayout()
+{
+    if (!m_imageViewport) return;
+
+    wxSize viewport = m_imageViewport->GetClientSize();
+    const int margin = 8;
+    const int gap = 6;
+
+    int zoomButtonsX = margin;
+    const bool hasShiftHints = m_zoomInShiftHint && m_zoomOutShiftHint &&
+                               m_zoomInShiftHint->GetBitmap().IsOk() &&
+                               m_zoomOutShiftHint->GetBitmap().IsOk();
+    if (hasShiftHints) {
+        wxSize shiftInSize = m_zoomInShiftHint->GetBestSize();
+        wxSize shiftOutSize = m_zoomOutShiftHint->GetBestSize();
+        const int shiftX = margin;
+        const int shiftGap = 6;
+        const int zoomRow1Y = margin;
+        const int zoomRow2Y = margin + std::max(shiftInSize.y, m_zoomInBtn ? m_zoomInBtn->GetBestSize().y : 0) + gap;
+
+        m_zoomInShiftHint->SetSize(shiftX, zoomRow1Y, shiftInSize.x, shiftInSize.y);
+        m_zoomOutShiftHint->SetSize(shiftX, zoomRow2Y, shiftOutSize.x, shiftOutSize.y);
+        if (m_zoomInShiftHint->IsShown()) m_zoomInShiftHint->Raise();
+        if (m_zoomOutShiftHint->IsShown()) m_zoomOutShiftHint->Raise();
+
+        zoomButtonsX = shiftX + std::max(shiftInSize.x, shiftOutSize.x) + shiftGap;
+    }
+
+    if (m_zoomInBtn && m_zoomOutBtn) {
+        wxSize plusSize = m_zoomInBtn->GetBestSize();
+        wxSize minusSize = m_zoomOutBtn->GetBestSize();
+        m_zoomInBtn->SetSize(zoomButtonsX, margin, plusSize.x, plusSize.y);
+        m_zoomOutBtn->SetSize(zoomButtonsX, margin + plusSize.y + gap, minusSize.x, minusSize.y);
+        if (m_zoomInBtn->IsShown()) m_zoomInBtn->Raise();
+        if (m_zoomOutBtn->IsShown()) m_zoomOutBtn->Raise();
+    }
+
+    if (!m_imageBitmap) return;
+
+    m_imageBitmap->SetPosition(wxPoint(0, 0));
+    m_imageBitmap->SetSize(viewport);
+}
+
+bool SortPhotosPanel::IsAtOriginalZoom() const
+{
+    return NearlyEqual(m_imageZoom, 1.0);
+}
+
+void SortPhotosPanel::EndImageDrag()
+{
+    m_isDraggingImage = false;
+    if (m_imageBitmap && m_imageBitmap->HasCapture())
+        m_imageBitmap->ReleaseMouse();
+}
+
+void SortPhotosPanel::ResetImageZoom()
+{
+    EndImageDrag();
+    m_imageZoom = 1.0;
+    m_imageOffset = wxPoint2DDouble(0.0, 0.0);
+    m_visibleImageRect = wxRect();
+}
+
+void SortPhotosPanel::ApplyZoomStep(int direction, const wxPoint* anchor)
+{
+    if (m_inReview || m_currentIsVideo) return;
+    if (!m_cachedSourceImage.IsOk()) return;
+
+    const wxSize viewport = GetImageDisplayBounds();
+    const wxSize sourceSize(m_cachedSourceImage.GetWidth(), m_cachedSourceImage.GetHeight());
+    const wxSize oldRenderedSize = CalculateRenderedSize(sourceSize, viewport, m_imageZoom);
+    const wxPoint2DDouble oldOffset = ClampImageOffsetToViewport(viewport, oldRenderedSize, m_imageOffset);
+
+    wxPoint anchorPoint = anchor ? *anchor : wxPoint(viewport.x / 2, viewport.y / 2);
+    anchorPoint.x = std::clamp(anchorPoint.x, 0, std::max(0, viewport.x));
+    anchorPoint.y = std::clamp(anchorPoint.y, 0, std::max(0, viewport.y));
+
+    const double previousZoom = m_imageZoom;
+    double newZoom = previousZoom;
+    if (direction > 0)
+        newZoom = std::min(ZOOM_MAX, previousZoom * ZOOM_STEP);
+    else if (direction < 0)
+        newZoom = std::max(ZOOM_MIN, previousZoom / ZOOM_STEP);
+
+    if (NearlyEqual(newZoom, 1.0))
+        newZoom = 1.0;
+
+    if (NearlyEqual(newZoom, previousZoom))
+        return;
+
+    const double relX = oldRenderedSize.x > 0
+        ? std::clamp((anchorPoint.x - oldOffset.m_x) / oldRenderedSize.x, 0.0, 1.0)
+        : 0.5;
+    const double relY = oldRenderedSize.y > 0
+        ? std::clamp((anchorPoint.y - oldOffset.m_y) / oldRenderedSize.y, 0.0, 1.0)
+        : 0.5;
+
+    EndImageDrag();
+    m_imageZoom = newZoom;
+
+    if (IsAtOriginalZoom()) {
+        m_imageOffset = wxPoint2DDouble(0.0, 0.0);
+    } else {
+        const wxSize newRenderedSize = CalculateRenderedSize(sourceSize, viewport, m_imageZoom);
+        wxPoint2DDouble desiredOffset(
+            anchorPoint.x - relX * newRenderedSize.x,
+            anchorPoint.y - relY * newRenderedSize.y);
+        m_imageOffset = ClampImageOffsetToViewport(viewport, newRenderedSize, desiredOffset);
+    }
+
+    if (!IsAtOriginalZoom() && m_showRuleOfThirds)
+        m_showRuleOfThirds = false;
+
+    LoadCurrentImage();
+}
+
+bool SortPhotosPanel::RefreshCurrentImageBitmap()
+{
+    if (!m_imageBitmap || m_currentIsVideo || m_activeImagePath.IsEmpty())
+        return false;
+
+    wxSize available = GetImageDisplayBounds();
+    if (available.x <= 0 || available.y <= 0) {
+        Layout();
+        UpdateImageViewportLayout();
+        available = GetImageDisplayBounds();
+    }
+
+    if (available.x <= 0 || available.y <= 0)
+        return false;
+
+    wxBitmap bitmap = GetOrCreateImageBitmap(m_activeImagePath, available, m_showRuleOfThirds);
+    if (!bitmap.IsOk()) {
+        InvalidateImageRenderCache();
+        bitmap = GetOrCreateImageBitmap(m_activeImagePath, available, m_showRuleOfThirds);
+    }
+
+    if (!bitmap.IsOk())
+        return false;
+
+    m_imageBitmap->SetBitmap(bitmap);
+    UpdateImageViewportLayout();
+    return true;
 }
 
 void SortPhotosPanel::LoadCurrentImage()
@@ -469,19 +786,24 @@ void SortPhotosPanel::LoadCurrentImage()
     m_progressLabel->SetLabel(wxString::Format("%zu/%zu", m_currentIndex, total));
     m_imageNameLabel->SetLabel(wxFileName(info->path).GetFullName());
 
+    if (m_activeImagePath != info->path) {
+        m_activeImagePath = info->path;
+        ResetImageZoom();
+        InvalidateImageRenderCache();
+    }
+
     m_currentIsVideo = MediaUtils::IsVideoFile(info->path);
     m_imageBitmap->Show();
+    Layout();
 
     if (m_currentIsVideo) {
         InvalidateImageRenderCache();
+        m_visibleImageRect = wxRect();
         // ── Video: show shell thumbnail + "Open in Player" button ────────────
         m_openVideoBtn->Show();
-        Layout();
-
-        wxSize panel = GetClientSize();
-        int btnW = m_folder1Btn->GetSize().x + 16;
-        int maxW = std::max(1, panel.x - 2 * btnW);
-        int maxH = std::max(1, (int)(panel.y * 0.70)); // leave room for the button below
+        wxSize viewport = GetImageDisplayBounds();
+        int maxW = std::max(1, viewport.x);
+        int maxH = std::max(1, viewport.y);
 
         // Request at the larger dimension so the shell gives us enough pixels,
         // then scale to fit within maxW x maxH (same aspect-ratio logic as images).
@@ -500,21 +822,37 @@ void SortPhotosPanel::LoadCurrentImage()
                 img = img.Scale(std::max(1, (int)(img.GetWidth()  * scale)),
                                 std::max(1, (int)(img.GetHeight() * scale)),
                                 wxIMAGE_QUALITY_HIGH);
-            m_imageBitmap->SetBitmap(wxBitmap(img));
+
+            wxBitmap frameBmp(std::max(1, viewport.x), std::max(1, viewport.y), 32);
+            wxMemoryDC dc(frameBmp);
+            wxColour bg = m_imageViewport ? m_imageViewport->GetBackgroundColour() : wxNullColour;
+            if (!bg.IsOk()) bg = GetBackgroundColour();
+            if (!bg.IsOk()) bg = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE);
+            dc.SetBackground(wxBrush(bg));
+            dc.Clear();
+
+            const wxPoint origin(
+                (viewport.x - img.GetWidth()) / 2,
+                (viewport.y - img.GetHeight()) / 2);
+            dc.DrawBitmap(wxBitmap(img), origin.x, origin.y, false);
+            dc.SelectObject(wxNullBitmap);
+
+            m_visibleImageRect = wxRect(origin, wxSize(img.GetWidth(), img.GetHeight()));
+            m_imageBitmap->SetBitmap(frameBmp);
         } else {
             m_imageBitmap->SetBitmap(wxNullBitmap);
         }
     } else {
         // ── Image: scale and display with wxStaticBitmap ─────────────────────
         m_openVideoBtn->Hide();
-        Layout();
-        wxBitmap bitmap = GetOrCreateImageBitmap(info->path, GetImageDisplayBounds(), m_showRuleOfThirds);
-        m_imageBitmap->SetBitmap(bitmap);
+        RefreshCurrentImageBitmap();
     }
 
     SetButtonsEnabled(true);
     UpdateGridToggleButton();
+    UpdateZoomButtons();
     Layout();
+    UpdateImageViewportLayout();
 }
 
 // ─────────────────────────────────────────────
@@ -633,6 +971,7 @@ void SortPhotosPanel::OnAllImagesActedUpon()
 
     // Destroy sorting UI and null all sorting-UI pointers
     DestroyChildren();
+    m_imageViewport  = nullptr;
     m_imageBitmap    = nullptr;
     m_openVideoBtn   = nullptr;
     m_progressBar    = nullptr;
@@ -644,6 +983,11 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     m_deleteBtn   = nullptr;
     m_undoBtn     = nullptr;
     m_ruleOfThirdsBtn = nullptr;
+    m_zoomInBtn   = nullptr;
+    m_zoomOutBtn  = nullptr;
+    m_zoomInShiftHint = nullptr;
+    m_zoomOutShiftHint = nullptr;
+    m_activeImagePath.clear();
     InvalidateImageRenderCache();
 
     AdvanceReviewStep();
@@ -914,12 +1258,118 @@ void SortPhotosPanel::OnDelete(wxCommandEvent& WXUNUSED(evt))
 
 void SortPhotosPanel::OnToggleRuleOfThirds(wxCommandEvent& WXUNUSED(evt))
 {
-    if (!m_ruleOfThirdsBtn || !m_ruleOfThirdsBtn->IsEnabled())
+    if (!m_ruleOfThirdsBtn || !m_ruleOfThirdsBtn->IsEnabled() || !IsAtOriginalZoom())
         return;
 
+    const bool previousState = m_showRuleOfThirds;
     m_showRuleOfThirds = !m_showRuleOfThirds;
+    InvalidateImageRenderCache();
+
+    if (!RefreshCurrentImageBitmap()) {
+        m_showRuleOfThirds = previousState;
+        InvalidateImageRenderCache();
+        RefreshCurrentImageBitmap();
+    }
+
     UpdateGridToggleButton();
-    LoadCurrentImage();
+}
+
+void SortPhotosPanel::OnZoomIn(wxCommandEvent& WXUNUSED(evt))
+{
+    ApplyZoomStep(1);
+}
+
+void SortPhotosPanel::OnZoomOut(wxCommandEvent& WXUNUSED(evt))
+{
+    ApplyZoomStep(-1);
+}
+
+void SortPhotosPanel::OnImageMouseWheel(wxMouseEvent& evt)
+{
+    if (m_inReview || m_currentIsVideo) {
+        evt.Skip();
+        return;
+    }
+
+    if (!m_visibleImageRect.Contains(evt.GetPosition())) {
+        evt.Skip();
+        return;
+    }
+
+    const int rotation = evt.GetWheelRotation();
+    if (rotation > 0)
+        ApplyZoomStep(1, &evt.GetPosition());
+    else if (rotation < 0)
+        ApplyZoomStep(-1, &evt.GetPosition());
+    else
+        evt.Skip();
+}
+
+void SortPhotosPanel::OnImageLeftDown(wxMouseEvent& evt)
+{
+    if (m_inReview || m_currentIsVideo || IsAtOriginalZoom() ||
+        !m_imageBitmap || !m_imageBitmap->GetBitmap().IsOk() ||
+        !m_visibleImageRect.Contains(evt.GetPosition())) {
+        evt.Skip();
+        return;
+    }
+
+    m_isDraggingImage = true;
+    m_imageDragStart = evt.GetPosition();
+    m_imageDragStartOffset = m_imageOffset;
+    if (!m_imageBitmap->HasCapture())
+        m_imageBitmap->CaptureMouse();
+}
+
+void SortPhotosPanel::OnImageLeftUp(wxMouseEvent& evt)
+{
+    if (!m_isDraggingImage) {
+        evt.Skip();
+        return;
+    }
+
+    EndImageDrag();
+}
+
+void SortPhotosPanel::OnImageMouseMove(wxMouseEvent& evt)
+{
+    if (!m_isDraggingImage) {
+        evt.Skip();
+        return;
+    }
+
+    if (!evt.LeftIsDown()) {
+        EndImageDrag();
+        evt.Skip();
+        return;
+    }
+
+    if (!m_cachedSourceImage.IsOk()) {
+        EndImageDrag();
+        return;
+    }
+
+    const wxSize viewport = GetImageDisplayBounds();
+    const wxSize sourceSize(m_cachedSourceImage.GetWidth(), m_cachedSourceImage.GetHeight());
+    const wxSize renderedSize = CalculateRenderedSize(sourceSize, viewport, m_imageZoom);
+    const wxPoint delta = evt.GetPosition() - m_imageDragStart;
+    const wxPoint2DDouble desiredOffset(
+        m_imageDragStartOffset.m_x + delta.x,
+        m_imageDragStartOffset.m_y + delta.y);
+    const wxPoint2DDouble clampedOffset =
+        ClampImageOffsetToViewport(viewport, renderedSize, desiredOffset);
+
+    if (NearlyEqual(clampedOffset.m_x, m_imageOffset.m_x) &&
+        NearlyEqual(clampedOffset.m_y, m_imageOffset.m_y))
+        return;
+
+    m_imageOffset = clampedOffset;
+    RefreshCurrentImageBitmap();
+}
+
+void SortPhotosPanel::OnImageCaptureLost(wxMouseCaptureLostEvent& WXUNUSED(evt))
+{
+    m_isDraggingImage = false;
 }
 
 // ─────────────────────────────────────────────
@@ -933,7 +1383,8 @@ void SortPhotosPanel::SetButtonsEnabled(bool enabled)
     if (m_saveBtn)    m_saveBtn   ->Enable(enabled);
     if (m_deleteBtn)  m_deleteBtn ->Enable(enabled);
     if (m_undoBtn)    m_undoBtn   ->Enable(enabled);
-    if (m_ruleOfThirdsBtn) m_ruleOfThirdsBtn->Enable(enabled && !m_currentIsVideo);
+    if (!enabled) ResetImageZoom();
+    UpdateZoomButtons();
     UpdateGridToggleButton();
 }
 
@@ -941,10 +1392,18 @@ void SortPhotosPanel::UpdateGridToggleButton()
 {
     if (!m_ruleOfThirdsBtn) return;
 
+    const bool sortingReady = m_folder1Btn && m_folder1Btn->IsEnabled();
+    const bool hasImage = !m_activeImagePath.IsEmpty() &&
+                          (m_cachedSourceImage.IsOk() ||
+                           (m_imageBitmap && m_imageBitmap->GetBitmap().IsOk()));
+    const bool allowGrid = sortingReady && hasImage && !m_currentIsVideo && IsAtOriginalZoom();
+
+    m_ruleOfThirdsBtn->Enable(allowGrid);
     m_ruleOfThirdsBtn->SetLabel(m_showRuleOfThirds ? "Grid On" : "Grid Off");
-    if (!m_ruleOfThirdsBtn->IsEnabled()) {
+    if (!allowGrid) {
         m_ruleOfThirdsBtn->SetBackgroundColour(wxNullColour);
         m_ruleOfThirdsBtn->SetForegroundColour(wxNullColour);
+        m_ruleOfThirdsBtn->Refresh();
         return;
     }
 
@@ -962,12 +1421,16 @@ void SortPhotosPanel::ShowDoneState()
 {
     m_inReview = true;
     DestroyChildren();
+    m_imageViewport  = nullptr;
     m_imageBitmap    = nullptr;
     m_openVideoBtn   = nullptr;
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
     m_folder1Btn = m_folder2Btn = m_saveBtn = m_deleteBtn = m_undoBtn = m_ruleOfThirdsBtn = nullptr;
+    m_zoomInBtn = m_zoomOutBtn = nullptr;
+    m_zoomInShiftHint = m_zoomOutShiftHint = nullptr;
+    m_activeImagePath.clear();
     InvalidateImageRenderCache();
 
     Freeze();
@@ -1008,12 +1471,38 @@ void SortPhotosPanel::OnSize(wxSizeEvent& evt)
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
     if (frame && frame->imageRepo.GetCount() > 0 && IsShown() && m_imageBitmap)
         LoadCurrentImage();
+    else
+        UpdateImageViewportLayout();
 }
 
 void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
 {
+    if (!IsShown()) {
+        evt.Skip();
+        return;
+    }
+
+    wxTopLevelWindow* tlw = wxDynamicCast(wxGetTopLevelParent(this), wxTopLevelWindow);
+    if (tlw && !tlw->IsActive()) {
+        evt.Skip();
+        return;
+    }
+
+    const int key = evt.GetKeyCode();
+    const wxChar unicode = (wxChar)evt.GetUnicodeKey();
+    const bool zoomInKey = key == WXK_ADD || key == WXK_NUMPAD_ADD ||
+                           unicode == '+' || (key == '=' && evt.ShiftDown());
+    const bool zoomOutKey = key == WXK_SUBTRACT || key == WXK_NUMPAD_SUBTRACT ||
+                            key == '-' || unicode == '-' || unicode == '_' ||
+                            (key == '-' && evt.ShiftDown());
+
+    if (zoomInKey || zoomOutKey) {
+        if (!m_inReview && !m_currentIsVideo && m_imageBitmap && m_imageBitmap->GetBitmap().IsOk())
+            ApplyZoomStep(zoomInKey ? 1 : -1);
+        return;
+    }
+
     if (m_inReview) {
-        const int key = evt.GetKeyCode();
         if (key == WXK_ESCAPE) {
             wxCommandEvent dummy;
             OnStepSkip(dummy);
@@ -1033,20 +1522,19 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
     }
 
     if (!m_folder1Btn || !m_folder1Btn->IsEnabled()) {
-        if (m_ruleOfThirdsBtn && m_ruleOfThirdsBtn->IsEnabled()) {
-            const int key = evt.GetKeyCode();
-            if (key == 'G' || key == 'g') {
+        if (key == 'G' || key == 'g') {
+            if (m_ruleOfThirdsBtn && m_ruleOfThirdsBtn->IsEnabled()) {
                 wxCommandEvent dummy;
                 OnToggleRuleOfThirds(dummy);
-                return;
             }
+            return;
         }
         evt.Skip();
         return;
     }
 
     wxCommandEvent dummy;
-    switch (evt.GetKeyCode()) {
+    switch (key) {
         case WXK_LEFT:  OnFolder1(dummy); break;
         case WXK_RIGHT: OnFolder2(dummy); break;
         case WXK_UP:    OnSave(dummy);    break;
@@ -1054,7 +1542,10 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
         case 'Z':
         case 'z':       OnUndo(dummy);    break;
         case 'G':
-        case 'g':       OnToggleRuleOfThirds(dummy); break;
+        case 'g':
+            if (m_ruleOfThirdsBtn && m_ruleOfThirdsBtn->IsEnabled())
+                OnToggleRuleOfThirds(dummy);
+            break;
         default:        evt.Skip();       break;
     }
 }
