@@ -259,7 +259,7 @@ void SortPhotosPanel::BuildSortingUI()
     m_ruleOfThirdsBtn->SetToolTip("Toggle a rule-of-thirds grid on the current image");
 
 
-    wxFlexGridSizer* grid = new wxFlexGridSizer(3, 3, 0, 0);
+    wxFlexGridSizer* grid = new wxFlexGridSizer(4, 3, 0, 0);
     grid->AddGrowableRow(1);
     grid->AddGrowableCol(1);
 
@@ -270,11 +270,16 @@ void SortPhotosPanel::BuildSortingUI()
     wxBoxSizer* imageCell = new wxBoxSizer(wxVERTICAL);
     imageCell->Add(m_imageNameLabel, 0, wxALIGN_CENTER | wxBOTTOM, 4);
     imageCell->Add(m_imageViewport,  1, wxEXPAND);
-    imageCell->Add(m_openVideoBtn,   0, wxALIGN_CENTER | wxTOP, 8);
 
     grid->Add(m_folder1Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(imageCell,    1, wxEXPAND, 10);
     grid->Add(m_folder2Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
+
+    // "Open in Player" row — sits between the media thumbnail and the delete button;
+    // collapses to zero height when the button is hidden (non-video images).
+    grid->Add(0, 0);
+    grid->Add(m_openVideoBtn, 0, wxALIGN_CENTER | wxTOP | wxBOTTOM, 4);
+    grid->Add(0, 0);
 
     grid->Add(m_ruleOfThirdsBtn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(m_deleteBtn,  0, wxALL | wxALIGN_CENTER, 8);
@@ -285,8 +290,8 @@ void SortPhotosPanel::BuildSortingUI()
     progressRow->Add(m_progressBar,   1, wxALIGN_CENTER_VERTICAL);
 
     wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
-    vSizer->Add(progressRow, 0, wxEXPAND | wxALL, 8);
-    vSizer->Add(grid, 1, wxEXPAND | wxALL, 5);
+    vSizer->Add(progressRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
+    vSizer->Add(grid, 1, wxEXPAND | wxALL, 8);
     SetSizer(vSizer);
 
     m_folder1Btn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnFolder1, this);
@@ -414,22 +419,18 @@ void SortPhotosPanel::CheckForPendingSession()
         for (const auto& p : m_folder2List) m_actionHistory.push_back({p, SortAction::MoveToFolder2});
         for (const auto& p : m_deleteList)  m_actionHistory.push_back({p, SortAction::Delete});
 
-        // Remove already-acted-upon images from imageRepo so sorting resumes
-        // from the first unprocessed image (m_currentIndex stays 0 after RefreshData reset).
-        // Collect indices descending so RemoveAt doesn't invalidate later indices.
-        std::vector<size_t> toRemove;
+        // Advance m_currentIndex past the already-processed images so sorting
+        // resumes at the correct position (e.g. 17/30, not 0/13).
+        // Images are always acted upon sequentially, so the processed ones
+        // occupy the first N positions in imageRepo.
         for (const auto& action : m_actionHistory) {
-            ptrdiff_t idx = frame->imageRepo.FindByPath(action.imagePath);
-            if (idx >= 0) toRemove.push_back(static_cast<size_t>(idx));
+            if (frame->imageRepo.FindByPath(action.imagePath) >= 0)
+                ++m_currentIndex;
         }
-        std::sort(toRemove.begin(), toRemove.end(), std::greater<size_t>());
-        toRemove.erase(std::unique(toRemove.begin(), toRemove.end()), toRemove.end());
-        for (size_t idx : toRemove)
-            frame->imageRepo.RemoveAt(idx);
 
-        LOG_INFO("Resumed previous session: %zu F1, %zu F2, %zu delete, %zu image(s) remaining",
+        LOG_INFO("Resumed previous session: %zu F1, %zu F2, %zu delete, resuming at %zu/%zu",
                  m_folder1List.size(), m_folder2List.size(), m_deleteList.size(),
-                 frame->imageRepo.GetCount());
+                 m_currentIndex, frame->imageRepo.GetCount());
     } else {
         if (wxFileExists(f1txt))  wxRemoveFile(f1txt);
         if (wxFileExists(f2txt))  wxRemoveFile(f2txt);
