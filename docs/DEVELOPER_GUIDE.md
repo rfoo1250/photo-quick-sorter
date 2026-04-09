@@ -76,6 +76,12 @@ target_compile_definitions(PhotoQuickSorter PRIVATE
 )
 ```
 
+**To switch configs**, use the toolbar dropdown in Visual Studio, or from the terminal:
+```bash
+cmake --build build --config Release
+cmake --build build --config Debug
+```
+
 **To force debug mode regardless of build config**, edit [src/utils/config.h](../src/utils/config.h):
 ```cpp
 #define DEBUG_MODE 1   // force on
