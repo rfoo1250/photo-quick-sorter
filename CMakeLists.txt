@@ -50,10 +50,7 @@ add_executable(PhotoQuickSorter WIN32 ${SOURCES} ${HEADERS})
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX "Source Files" FILES ${SOURCES} ${HEADERS})
 
-target_compile_definitions(PhotoQuickSorter PRIVATE
-    $<$<CONFIG:Debug>:DEBUG_MODE=1>
-    $<$<NOT:$<CONFIG:Debug>>:DEBUG_MODE=0>
-)
+target_compile_definitions(PhotoQuickSorter PRIVATE)
 
 # ---- Attach wxWidgets to the target (important) ----
 # Add include directories found by find_package
@@ -80,6 +77,12 @@ target_link_libraries(PhotoQuickSorter PRIVATE
     $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxtiffd.lib>
     $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxzlibd.lib>
     $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxexpatd.lib>
+    $<$<NOT:$<CONFIG:Debug>>:${wxWidgets_LIB_DIR}/wxwebp.lib>
+    $<$<NOT:$<CONFIG:Debug>>:${wxWidgets_LIB_DIR}/wxjpeg.lib>
+    $<$<NOT:$<CONFIG:Debug>>:${wxWidgets_LIB_DIR}/wxpng.lib>
+    $<$<NOT:$<CONFIG:Debug>>:${wxWidgets_LIB_DIR}/wxtiff.lib>
+    $<$<NOT:$<CONFIG:Debug>>:${wxWidgets_LIB_DIR}/wxzlib.lib>
+    $<$<NOT:$<CONFIG:Debug>>:${wxWidgets_LIB_DIR}/wxexpat.lib>
 )
 
 # Optional: include your src folder for your own headers

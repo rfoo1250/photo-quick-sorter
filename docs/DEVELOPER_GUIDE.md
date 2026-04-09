@@ -59,36 +59,19 @@ cmake --build build --config Debug
 
 ## Debug Mode
 
-`DEBUG_MODE` controls whether `LOG_DEBUG(...)` calls compile in or are stripped out.
+`DEBUG_MODE` controls whether `LOG_DEBUG(...)` calls compile in and whether the log window appears.
 
-**It is set automatically by CMake based on build config:**
+**To switch, edit [src/utils/config.h](../src/utils/config.h)** and rebuild:
 
-| Config | `DEBUG_MODE` value |
-|--------|--------------------|
-| Debug | `1` — `LOG_DEBUG` active |
-| Release | `0` — `LOG_DEBUG` compiled away |
-
-This is declared in [CMakeLists.txt](../CMakeLists.txt):
-```cmake
-target_compile_definitions(PhotoQuickSorter PRIVATE
-    $<$<CONFIG:Debug>:DEBUG_MODE=1>
-    $<$<NOT:$<CONFIG:Debug>>:DEBUG_MODE=0>
-)
+```cpp
+#define DEBUG_MODE 1   // dev build — logs + log window visible
+#define DEBUG_MODE 0   // release build — all debug output stripped
 ```
 
-**To switch configs**, use the toolbar dropdown in Visual Studio, or from the terminal:
+Always build with `--config Debug` (Release config requires wxWidgets Release libs which aren't set up):
 ```bash
-cmake --build build --config Release
 cmake --build build --config Debug
 ```
-
-**To force debug mode regardless of build config**, edit [src/utils/config.h](../src/utils/config.h):
-```cpp
-#define DEBUG_MODE 1   // force on
-// #define DEBUG_MODE 0   // force off
-```
-
-The `#ifndef` guard means `config.h` only takes effect if CMake hasn't already defined it — useful for quick overrides during development.
 
 ---
 
