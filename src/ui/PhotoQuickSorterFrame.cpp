@@ -44,6 +44,7 @@ PhotoQuickSorterFrame::PhotoQuickSorterFrame(const wxString &title)
     }
 #endif
 
+    Bind(wxEVT_SIZE, &PhotoQuickSorterFrame::OnSize, this);
     Layout();
 }
 
@@ -65,6 +66,12 @@ void PhotoQuickSorterFrame::ShowSortPhotosPanel()
         m_sortPhotosPanel->Show();
     }
     Layout();
+}
+
+void PhotoQuickSorterFrame::OnSize(wxSizeEvent& evt)
+{
+    LOG_DEBUG("Frame resize: %dx%d", evt.GetSize().x, evt.GetSize().y);
+    evt.Skip();
 }
 
 PhotoQuickSorterFrame::~PhotoQuickSorterFrame()

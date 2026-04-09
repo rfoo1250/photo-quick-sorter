@@ -682,6 +682,8 @@ void SortPhotosPanel::EndImageDrag()
 void SortPhotosPanel::ResetImageZoom()
 {
     EndImageDrag();
+    if (!IsAtOriginalZoom())
+        LOG_DEBUG("ResetImageZoom: was %.2f -> 1.0", m_imageZoom);
     m_imageZoom = 1.0;
     m_imageOffset = wxPoint2DDouble(0.0, 0.0);
     m_visibleImageRect = wxRect();
@@ -737,6 +739,7 @@ void SortPhotosPanel::ApplyZoomStep(int direction, const wxPoint* anchor)
     if (!IsAtOriginalZoom() && m_showRuleOfThirds)
         m_showRuleOfThirds = false;
 
+    LOG_DEBUG("ApplyZoomStep: %.2f -> %.2f (dir=%d)", previousZoom, m_imageZoom, direction);
     LoadCurrentImage();
 }
 
@@ -752,8 +755,10 @@ bool SortPhotosPanel::RefreshCurrentImageBitmap()
         available = GetImageDisplayBounds();
     }
 
-    if (available.x <= 0 || available.y <= 0)
+    if (available.x <= 0 || available.y <= 0) {
+        LOG_WARN("RefreshCurrentImageBitmap: viewport still invalid after Layout (%dx%d)", available.x, available.y);
         return false;
+    }
 
     wxBitmap bitmap = GetOrCreateImageBitmap(m_activeImagePath, available, m_showRuleOfThirds);
     if (!bitmap.IsOk()) {

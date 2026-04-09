@@ -27,6 +27,7 @@ public:
     void ShowSortPhotosPanel();
 
 private:
+    void OnSize(wxSizeEvent& evt);
     MainMenuPanel* m_mainMenuPanel = nullptr;
     SortPhotosPanel* m_sortPhotosPanel = nullptr;
 
