@@ -1,8 +1,10 @@
 #include "ui/ThumbnailGrid.h"
 #include "utils/MediaUtils.h"
+#include "utils/logging.h"
 #include <wx/filename.h>
 #include <wx/filefn.h>
 #include <wx/statbmp.h>
+#include <wx/dcbuffer.h>
 #include <algorithm>
 #include <thread>
 
@@ -104,6 +106,49 @@ static wxImage GetShellThumbnailImage(const wxString& path, int size)
 #endif // __WXMSW__
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ThumbDisplay — custom-drawn panel that owns its own bitmap painting.
+// Replaces wxStaticBitmap to avoid a Windows-specific issue: STM_SETIMAGE
+// returns the old HBITMAP which wxWidgets wraps in a temporary wxBitmap and
+// immediately destroys, freeing the handle that our wxBitmap member still
+// references. The control then renders blank even though IsOk() returns true.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class ThumbDisplay : public wxPanel {
+public:
+    ThumbDisplay(wxWindow* parent, int size)
+        : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(size, size))
+    {
+        SetMinSize(wxSize(size, size));
+        SetBackgroundStyle(wxBG_STYLE_PAINT);
+        Bind(wxEVT_PAINT, &ThumbDisplay::OnPaint, this);
+    }
+
+    void SetBitmap(const wxBitmap& bmp)
+    {
+        m_bmp = bmp;
+        Refresh();
+    }
+
+    bool HasBitmap() const { return m_bmp.IsOk(); }
+
+private:
+    void OnPaint(wxPaintEvent&)
+    {
+        wxAutoBufferedPaintDC dc(this);
+        wxSize sz = GetClientSize();
+        dc.SetBackground(wxBrush(GetBackgroundColour()));
+        dc.Clear();
+        if (m_bmp.IsOk()) {
+            int x = (sz.x - m_bmp.GetWidth())  / 2;
+            int y = (sz.y - m_bmp.GetHeight()) / 2;
+            dc.DrawBitmap(m_bmp, x, y, false);
+        }
+    }
+
+    wxBitmap m_bmp;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // RemovableThumb — a single interactive thumbnail cell.
 // Used by ThumbnailGrid when a remove callback is set.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,9 +160,10 @@ public:
         : wxPanel(parent, wxID_ANY)
         , m_path(path)
         , m_onRemove(std::move(onRemove))
+        , m_hoverTimer(this)
     {
-        m_thumb = new wxStaticBitmap(this, wxID_ANY, MakePlaceholder(thumbSize));
-        m_thumb->SetMinSize(wxSize(thumbSize, thumbSize));
+        m_thumb = new ThumbDisplay(this, thumbSize);
+        m_thumb->SetBitmap(MakePlaceholder(thumbSize));
 
         m_label = new wxStaticText(this, wxID_ANY,
             wxFileName(path).GetFullName(),
@@ -139,6 +185,12 @@ public:
             m_onRemove(m_path);
         });
 
+        // Timer-based hover polling: when hovered, poll every 40 ms to detect
+        // when the cursor truly leaves the cell. This bypasses the unreliable
+        // Win32 WM_MOUSELEAVE tracking chain that breaks when m_undoBtn
+        // is shown/hidden (which can cancel the child's TrackMouseEvent).
+        m_hoverTimer.Bind(wxEVT_TIMER, &RemovableThumb::OnHoverTimer, this);
+
         // Bind hover on this panel and its layout children so any motion
         // inside the cell triggers enter; OnLeave does a bounds check so
         // moving between children doesn't flicker.
@@ -153,7 +205,8 @@ public:
     {
         m_normalBmp = bmp;
         m_dimBmp    = MakeDim(bmp);
-        m_thumb->SetBitmap(m_hovered && m_dimBmp.IsOk() ? m_dimBmp : m_normalBmp);
+        LOG_DEBUG("Thumb loaded: %s", wxFileName(m_path).GetFullName());
+        m_thumb->SetBitmap((m_hovered && m_dimBmp.IsOk()) ? m_dimBmp : m_normalBmp);
     }
 
 private:
@@ -163,27 +216,46 @@ private:
         w->Bind(wxEVT_LEAVE_WINDOW, &RemovableThumb::OnLeave, this);
     }
 
+    void OnHoverTimer(wxTimerEvent&)
+    {
+        wxPoint pos = ScreenToClient(wxGetMousePosition());
+        if (GetClientRect().Contains(pos)) {
+            SetHovered(true);
+            m_hoverTimer.StartOnce(40);
+        } else {
+            SetHovered(false);
+        }
+    }
+
     void OnEnter(wxMouseEvent& evt)
     {
         evt.Skip();
-        SetHovered(true);
+        wxPoint pos = ScreenToClient(wxGetMousePosition());
+        if (GetClientRect().Contains(pos)) {
+            SetHovered(true);
+            if (!m_hoverTimer.IsRunning())
+                m_hoverTimer.StartOnce(40);
+        }
     }
 
     void OnLeave(wxMouseEvent& evt)
     {
         evt.Skip();
-        // Only un-hover when the mouse truly leaves the cell's bounding rect.
-        // Without this check, moving from the thumb onto the label (or onto the
-        // undo button) would fire Leave on the source child and flicker.
         wxPoint pos = ScreenToClient(wxGetMousePosition());
-        if (!GetClientRect().Contains(pos))
+        if (!GetClientRect().Contains(pos)) {
+            m_hoverTimer.Stop();
             SetHovered(false);
+        } else if (!m_hoverTimer.IsRunning()) {
+            m_hoverTimer.StartOnce(40);
+        }
     }
 
     void SetHovered(bool hovered)
     {
         if (m_hovered == hovered) return;
         m_hovered = hovered;
+        LOG_DEBUG("Thumb hover: %s -> %s", wxFileName(m_path).GetFullName(),
+            hovered ? "on" : "off");
 
         if (hovered) {
             if (m_dimBmp.IsOk())
@@ -200,18 +272,22 @@ private:
             m_undoBtn->Show();
             m_undoBtn->Raise();
         } else {
-            m_undoBtn->Hide();
+            // Restore bitmap BEFORE hiding the button so that when Win32 repaints
+            // the area the button was covering, it reveals the normal image
+            // rather than a still-dim or blank frame.
             if (m_normalBmp.IsOk())
                 m_thumb->SetBitmap(m_normalBmp);
+            m_undoBtn->Hide();
         }
     }
 
-    wxStaticBitmap* m_thumb   = nullptr;
+    ThumbDisplay*   m_thumb   = nullptr;
     wxStaticText*   m_label   = nullptr;
     wxButton*       m_undoBtn = nullptr;
     wxBitmap        m_normalBmp;
     wxBitmap        m_dimBmp;
     bool            m_hovered = false;
+    wxTimer         m_hoverTimer;
     wxString        m_path;
     std::function<void(const wxString&)> m_onRemove;
 };

@@ -74,7 +74,9 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
 
     // --- Controls ---
     wxStaticText *baseFolderNameLabel = new wxStaticText(this, wxID_ANY, "Base Folder path:");
-    m_baseFolderText = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(400, -1));
+    wxString defaultBase = wxStandardPaths::Get().GetUserDir(wxStandardPaths::Dir_Pictures);
+    if (!wxDir::Exists(defaultBase)) defaultBase.Clear();
+    m_baseFolderText = new wxTextCtrl(this, wxID_ANY, defaultBase, wxDefaultPosition, wxSize(400, -1));
     wxButton *baseFolderNameBrowseBtn = new wxButton(this, ID_BROWSE_BASE, "Browse");
 
     wxStaticText *folder1NameLabel = new wxStaticText(this, wxID_ANY, "Folder 1 path:");

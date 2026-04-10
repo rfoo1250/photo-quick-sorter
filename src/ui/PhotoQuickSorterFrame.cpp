@@ -42,6 +42,10 @@ PhotoQuickSorterFrame::PhotoQuickSorterFrame(const wxString &title)
     {
         LOG_INFO("Developer console (LogWindow) attached");
     }
+#else
+    // Suppress all wxLog output in release — no log window, no popup dialogs.
+    // User-facing errors are reported via wxMessageBox directly where they occur.
+    wxLog::EnableLogging(false);
 #endif
 
     Bind(wxEVT_SIZE, &PhotoQuickSorterFrame::OnSize, this);

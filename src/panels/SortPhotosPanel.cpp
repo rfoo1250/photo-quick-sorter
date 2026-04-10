@@ -1150,17 +1150,18 @@ void SortPhotosPanel::OnStepSkip(wxCommandEvent& WXUNUSED(evt))
 // Execution
 // ─────────────────────────────────────────────
 
-void SortPhotosPanel::ExecuteFileMove(const wxString& srcPath, const wxString& destFolder)
+wxString SortPhotosPanel::ExecuteFileMove(const wxString& srcPath, const wxString& destFolder)
 {
     if (!wxFileExists(srcPath)) {
         LOG_WARN("ExecuteFileMove: source no longer exists: %s", srcPath);
-        return;
+        return wxString(); // silent skip — file already gone
     }
 
     if (!wxDir::Exists(destFolder)) {
         if (!wxFileName::Mkdir(destFolder, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL)) {
             LOG_ERROR("ExecuteFileMove: could not create folder: %s", destFolder);
-            return;
+            return wxString::Format("'%s' could not be moved — destination folder could not be created",
+                                   wxFileName(srcPath).GetFullName());
         }
     }
 
@@ -1176,12 +1177,17 @@ void SortPhotosPanel::ExecuteFileMove(const wxString& srcPath, const wxString& d
 
     if (!wxCopyFile(srcPath, dest)) {
         LOG_ERROR("ExecuteFileMove: copy failed: %s -> %s", srcPath, dest);
-        return;
+        return wxString::Format("'%s' could not be moved (%s)",
+                                srcFn.GetFullName(), wxSysErrorMsg());
     }
-    if (!wxRemoveFile(srcPath))
+    if (!wxRemoveFile(srcPath)) {
         LOG_WARN("ExecuteFileMove: copy ok but source not deleted: %s", srcPath);
+        return wxString::Format("'%s' was copied but the original could not be removed (%s)",
+                                srcFn.GetFullName(), wxSysErrorMsg());
+    }
 
     LOG_DEBUG("ExecuteFileMove: moved %s -> %s", srcPath, dest);
+    return wxString();
 }
 
 void SortPhotosPanel::ExecuteConfirmedActions()
@@ -1189,23 +1195,41 @@ void SortPhotosPanel::ExecuteConfirmedActions()
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
     if (!frame) return;
 
+    std::vector<wxString> failures;
+
     for (const auto& action : m_actionHistory) {
         switch (action.type) {
             case SortAction::MoveToFolder1:
-                if (m_folder1Confirmed)
-                    ExecuteFileMove(action.imagePath, frame->folderLocations.folder1);
+                if (m_folder1Confirmed) {
+                    wxString err = ExecuteFileMove(action.imagePath, frame->folderLocations.folder1);
+                    if (!err.IsEmpty()) failures.push_back(err);
+                }
                 break;
             case SortAction::MoveToFolder2:
-                if (m_folder2Confirmed)
-                    ExecuteFileMove(action.imagePath, frame->folderLocations.folder2);
+                if (m_folder2Confirmed) {
+                    wxString err = ExecuteFileMove(action.imagePath, frame->folderLocations.folder2);
+                    if (!err.IsEmpty()) failures.push_back(err);
+                }
                 break;
             case SortAction::Delete:
-                if (m_deleteConfirmed && wxFileExists(action.imagePath))
-                    wxRemoveFile(action.imagePath);
+                if (m_deleteConfirmed && wxFileExists(action.imagePath)) {
+                    if (!wxRemoveFile(action.imagePath)) {
+                        LOG_WARN("ExecuteConfirmedActions: delete failed: %s", action.imagePath);
+                        failures.push_back(wxString::Format("'%s' could not be deleted (%s)",
+                            wxFileName(action.imagePath).GetFullName(), wxSysErrorMsg()));
+                    }
+                }
                 break;
             case SortAction::Save:
                 break;
         }
+    }
+
+    if (!failures.empty()) {
+        wxString msg = "The following files could not be processed:\n\n";
+        for (const auto& f : failures)
+            msg += "\u2022 " + f + "\n";
+        wxMessageBox(msg, "Some files could not be moved", wxOK | wxICON_WARNING, this);
     }
 
     // Clean up all persistence files

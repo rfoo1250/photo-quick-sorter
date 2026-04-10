@@ -100,7 +100,7 @@ private:
     void AdvanceReviewStep();
     void ShowReviewStep();
     void ExecuteConfirmedActions();
-    void ExecuteFileMove(const wxString& srcPath, const wxString& destFolder);
+    wxString ExecuteFileMove(const wxString& srcPath, const wxString& destFolder);
 
     // --- crash recovery ---
     void CheckForPendingSession();
