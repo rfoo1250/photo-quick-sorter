@@ -382,22 +382,28 @@ void SortPhotosPanel::CheckForPendingSession()
     wxString f2txt  = base + wxFILE_SEP_PATH + "_pending_folder2.txt";
     wxString deltxt = base + wxFILE_SEP_PATH + "_pending_deletes.txt";
 
-    auto loadTxt = [](const wxString& path, std::vector<wxString>& out) {
+    auto loadTxt = [](const wxString& path, wxString& destDir, std::vector<wxString>& out) {
         if (!wxFileExists(path)) return;
         wxTextFile f;
         if (!f.Open(path)) return;
         for (size_t i = 0; i < f.GetLineCount(); ++i) {
             wxString line = f.GetLine(i).Trim(true).Trim(false);
-            if (!line.IsEmpty() && wxFileExists(line))
+            if (line.IsEmpty()) continue;
+            if (line.StartsWith("DEST:")) {
+                destDir = line.Mid(5);
+                continue;
+            }
+            if (wxFileExists(line))
                 out.push_back(line);
         }
         f.Close();
     };
 
+    wxString savedDest1, savedDest2, unused;
     std::vector<wxString> tmp1, tmp2, tmpd;
-    loadTxt(f1txt,  tmp1);
-    loadTxt(f2txt,  tmp2);
-    loadTxt(deltxt, tmpd);
+    loadTxt(f1txt,  savedDest1, tmp1);
+    loadTxt(f2txt,  savedDest2, tmp2);
+    loadTxt(deltxt, unused,     tmpd);
 
     size_t total = tmp1.size() + tmp2.size() + tmpd.size();
     if (total == 0) return;
@@ -411,6 +417,31 @@ void SortPhotosPanel::CheckForPendingSession()
         wxYES_NO | wxICON_QUESTION, this);
 
     if (answer == wxYES) {
+        // Check whether the user entered different destination folders this time.
+        // If so, warn and override with the saved ones so files go to the right place.
+        bool mismatch1 = !savedDest1.IsEmpty() && savedDest1 != frame->folderLocations.folder1;
+        bool mismatch2 = !savedDest2.IsEmpty() && savedDest2 != frame->folderLocations.folder2;
+
+        if (mismatch1 || mismatch2) {
+            auto descEntered = [](const wxString& s) -> wxString {
+                return s.IsEmpty() ? wxString("(none entered this session)")
+                                   : wxString::Format("\"%s\"", s);
+            };
+
+            wxString msg = "The previous session used different destination folders.\n"
+                           "The original destinations will be used to avoid misplacing files:\n\n";
+            if (mismatch1)
+                msg += wxString::Format("  Folder 1: \"%s\"\n  (this session: %s)\n\n",
+                                        savedDest1, descEntered(frame->folderLocations.folder1));
+            if (mismatch2)
+                msg += wxString::Format("  Folder 2: \"%s\"\n  (this session: %s)\n\n",
+                                        savedDest2, descEntered(frame->folderLocations.folder2));
+            wxMessageBox(msg, "Destination Folders Changed", wxOK | wxICON_WARNING, this);
+
+            if (mismatch1) frame->folderLocations.folder1 = savedDest1;
+            if (mismatch2) frame->folderLocations.folder2 = savedDest2;
+        }
+
         m_folder1List = std::move(tmp1);
         m_folder2List = std::move(tmp2);
         m_deleteList  = std::move(tmpd);
@@ -878,11 +909,11 @@ void SortPhotosPanel::RecordAction(SortAction type)
     switch (type) {
         case SortAction::MoveToFolder1:
             m_folder1List.push_back(info->path);
-            PersistList(m_folder1List, "_pending_folder1.txt");
+            PersistList(m_folder1List, "_pending_folder1.txt", frame->folderLocations.folder1);
             break;
         case SortAction::MoveToFolder2:
             m_folder2List.push_back(info->path);
-            PersistList(m_folder2List, "_pending_folder2.txt");
+            PersistList(m_folder2List, "_pending_folder2.txt", frame->folderLocations.folder2);
             break;
         case SortAction::Delete:
             m_deleteList.push_back(info->path);
@@ -899,7 +930,8 @@ void SortPhotosPanel::RecordAction(SortAction type)
     LoadCurrentImage();
 }
 
-void SortPhotosPanel::PersistList(const std::vector<wxString>& list, const wxString& filename)
+void SortPhotosPanel::PersistList(const std::vector<wxString>& list, const wxString& filename,
+                                   const wxString& destDir)
 {
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
     if (!frame) return;
@@ -918,6 +950,8 @@ void SortPhotosPanel::PersistList(const std::vector<wxString>& list, const wxStr
     } else {
         if (!f.Create(path)) return;
     }
+    if (!destDir.IsEmpty())
+        f.AddLine("DEST:" + destDir);
     for (const auto& entry : list) f.AddLine(entry);
     f.Write();
     f.Close();
@@ -943,11 +977,11 @@ void SortPhotosPanel::OnUndo(wxCommandEvent& WXUNUSED(evt))
     switch (undone.type) {
         case SortAction::MoveToFolder1:
             removeFrom(m_folder1List);
-            PersistList(m_folder1List, "_pending_folder1.txt");
+            PersistList(m_folder1List, "_pending_folder1.txt", frame->folderLocations.folder1);
             break;
         case SortAction::MoveToFolder2:
             removeFrom(m_folder2List);
-            PersistList(m_folder2List, "_pending_folder2.txt");
+            PersistList(m_folder2List, "_pending_folder2.txt", frame->folderLocations.folder2);
             break;
         case SortAction::Delete:
             removeFrom(m_deleteList);
@@ -1080,8 +1114,8 @@ void SortPhotosPanel::ShowReviewStep()
             m_actionHistory.end());
 
         // Persist updated lists
-        PersistList(m_folder1List, "_pending_folder1.txt");
-        PersistList(m_folder2List, "_pending_folder2.txt");
+        PersistList(m_folder1List, "_pending_folder1.txt", frame->folderLocations.folder1);
+        PersistList(m_folder2List, "_pending_folder2.txt", frame->folderLocations.folder2);
         PersistList(m_deleteList,  "_pending_deletes.txt");
 
         // Update the title label to reflect the new count

@@ -93,7 +93,8 @@ private:
     void InvalidateImageRenderCache();
     void ShowDoneState();
     void RecordAction(SortAction type);
-    void PersistList(const std::vector<wxString>& list, const wxString& filename);
+    void PersistList(const std::vector<wxString>& list, const wxString& filename,
+                     const wxString& destDir = wxEmptyString);
 
     // --- end-of-session ---
     void OnAllImagesActedUpon();
