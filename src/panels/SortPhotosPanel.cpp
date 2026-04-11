@@ -516,8 +516,7 @@ wxSize SortPhotosPanel::GetImageDisplayBounds() const
     }
 
     wxSize panel = GetClientSize();
-    int btnW = m_folder1Btn ? (m_folder1Btn->GetSize().x + 16) : 0;
-    int maxW = std::max(1, panel.x - 2 * btnW);
+    int maxW = std::max(1, (int)(panel.x * 0.75));
     int maxH = std::max(1, (int)(panel.y * 0.75));
     return wxSize(maxW, maxH);
 }
@@ -974,14 +973,18 @@ void SortPhotosPanel::OnUndo(wxCommandEvent& WXUNUSED(evt))
         if (it != list.end()) list.erase(it);
     };
 
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+
     switch (undone.type) {
         case SortAction::MoveToFolder1:
             removeFrom(m_folder1List);
-            PersistList(m_folder1List, "_pending_folder1.txt", frame->folderLocations.folder1);
+            PersistList(m_folder1List, "_pending_folder1.txt",
+                        frame ? frame->folderLocations.folder1 : wxString());
             break;
         case SortAction::MoveToFolder2:
             removeFrom(m_folder2List);
-            PersistList(m_folder2List, "_pending_folder2.txt", frame->folderLocations.folder2);
+            PersistList(m_folder2List, "_pending_folder2.txt",
+                        frame ? frame->folderLocations.folder2 : wxString());
             break;
         case SortAction::Delete:
             removeFrom(m_deleteList);
@@ -1102,7 +1105,7 @@ void SortPhotosPanel::ShowReviewStep()
 
     // Scrollable thumbnail grid — interactive: hover any image to undo it
     ThumbnailGrid* thumbGrid = new ThumbnailGrid(this);
-    thumbGrid->SetRemoveCallback([this, list, title, step](const wxString& path) {
+    thumbGrid->SetRemoveCallback([this, frame, list, title, step](const wxString& path) {
         // Remove from the active review list
         auto it = std::find(list->begin(), list->end(), path);
         if (it != list->end()) list->erase(it);
