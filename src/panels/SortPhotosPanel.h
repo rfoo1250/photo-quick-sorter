@@ -1,6 +1,7 @@
 #pragma once
 #include <wx/wx.h>
 #include <wx/statbmp.h>
+#include <wx/timer.h>
 #include <wx/scrolwin.h>
 #include <wx/wrapsizer.h>
 #include <wx/gauge.h>
@@ -34,6 +35,8 @@ private:
     wxGauge*        m_progressBar    = nullptr;
     wxStaticText*   m_progressLabel  = nullptr;
     wxStaticText*   m_imageNameLabel = nullptr;
+    wxButton*       m_copyNameBtn   = nullptr;
+    wxTimer*        m_copyNameTimer = nullptr;
     wxButton*       m_folder1Btn    = nullptr;
     wxButton*       m_folder2Btn  = nullptr;
     wxButton*       m_saveBtn     = nullptr;

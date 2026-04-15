@@ -5,6 +5,7 @@
 #include "utils/MediaUtils.h"
 #include <wx/filename.h>
 #include <wx/filefn.h>
+#include <wx/clipbrd.h>
 #include <wx/dir.h>
 #include <wx/textfile.h>
 #include <wx/stdpaths.h>
@@ -222,6 +223,15 @@ void SortPhotosPanel::BuildSortingUI()
     });
 
     m_imageNameLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER | wxST_ELLIPSIZE_END);
+    m_imageNameLabel->SetToolTip("Copy path");
+    m_imageNameLabel->SetCursor(wxCursor(wxCURSOR_HAND));
+    m_imageNameLabel->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) {
+        if (m_activeImagePath.IsEmpty()) return;
+        if (wxTheClipboard->Open()) {
+            wxTheClipboard->SetData(new wxTextDataObject(m_activeImagePath));
+            wxTheClipboard->Close();
+        }
+    });
     m_progressLabel  = new wxStaticText(this, wxID_ANY, "0/0", wxDefaultPosition, wxSize(60, -1), wxALIGN_RIGHT);
     m_progressBar    = new wxGauge(this, wxID_ANY, 1, wxDefaultPosition, wxDefaultSize, wxGA_HORIZONTAL | wxGA_SMOOTH);
 
@@ -237,6 +247,7 @@ void SortPhotosPanel::BuildSortingUI()
     wxBitmap icUp    = LoadKeycap("cursor-up.png");
     wxBitmap icDown  = LoadKeycap("cursor-down.png");
     wxBitmap icZ     = LoadKeycap("z.png");
+    wxBitmap icC     = LoadKeycap("c.png");
     wxBitmap icG     = LoadKeycap("g.png");
     wxBitmap icShift = LoadKeycap("shift.png");
     wxBitmap icPlus  = LoadKeycap("equals-plus.png");
@@ -258,6 +269,24 @@ void SortPhotosPanel::BuildSortingUI()
     if (icMinus.IsOk()) { m_zoomOutBtn->SetBitmap(icMinus); m_zoomOutBtn->SetBitmapPosition(wxLEFT);  }
     m_ruleOfThirdsBtn->SetToolTip("Toggle a rule-of-thirds grid on the current image");
 
+    m_copyNameBtn = new wxButton(this, wxID_ANY, "Copy name");
+    m_copyNameBtn->SetToolTip("Copy just the name of the file");
+    if (icC.IsOk())     { m_copyNameBtn->SetBitmap(icC);   m_copyNameBtn->SetBitmapPosition(wxLEFT);  }
+    m_copyNameTimer = new wxTimer();
+    m_copyNameTimer->Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+        if (m_copyNameBtn) m_copyNameBtn->SetLabel("Copy name");
+    });
+    m_copyNameBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        if (m_activeImagePath.IsEmpty()) return;
+        wxString stem = wxFileName(m_activeImagePath).GetName();
+        if (wxTheClipboard->Open()) {
+            wxTheClipboard->SetData(new wxTextDataObject(stem));
+            wxTheClipboard->Close();
+        }
+        m_copyNameBtn->SetLabel("Copied!");
+        m_copyNameTimer->Stop();
+        m_copyNameTimer->StartOnce(2000);
+    });
 
     wxFlexGridSizer* grid = new wxFlexGridSizer(4, 3, 0, 0);
     grid->AddGrowableRow(1);
@@ -265,7 +294,7 @@ void SortPhotosPanel::BuildSortingUI()
 
     grid->Add(m_undoBtn,    0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(m_saveBtn,    0, wxALL | wxALIGN_CENTER, 8);
-    grid->Add(0, 0);
+    grid->Add(m_copyNameBtn, 0, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL, 8);
 
     wxBoxSizer* imageCell = new wxBoxSizer(wxVERTICAL);
     imageCell->Add(m_imageNameLabel, 0, wxALIGN_CENTER | wxBOTTOM, 4);
@@ -1030,6 +1059,8 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     m_zoomOutBtn  = nullptr;
     m_zoomInShiftHint = nullptr;
     m_zoomOutShiftHint = nullptr;
+    if (m_copyNameTimer) { m_copyNameTimer->Stop(); delete m_copyNameTimer; m_copyNameTimer = nullptr; }
+    m_copyNameBtn = nullptr;
     m_activeImagePath.clear();
     InvalidateImageRenderCache();
 
@@ -1497,6 +1528,8 @@ void SortPhotosPanel::ShowDoneState()
     m_folder1Btn = m_folder2Btn = m_saveBtn = m_deleteBtn = m_undoBtn = m_ruleOfThirdsBtn = nullptr;
     m_zoomInBtn = m_zoomOutBtn = nullptr;
     m_zoomInShiftHint = m_zoomOutShiftHint = nullptr;
+    if (m_copyNameTimer) { m_copyNameTimer->Stop(); delete m_copyNameTimer; m_copyNameTimer = nullptr; }
+    m_copyNameBtn = nullptr;
     m_activeImagePath.clear();
     InvalidateImageRenderCache();
 
@@ -1608,6 +1641,19 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
         case WXK_DOWN:  OnDelete(dummy);  break;
         case 'Z':
         case 'z':       OnUndo(dummy);    break;
+        case 'C':
+        case 'c':
+            if (m_copyNameBtn && m_copyNameBtn->IsEnabled() && !m_activeImagePath.IsEmpty()) {
+                wxString stem = wxFileName(m_activeImagePath).GetName();
+                if (wxTheClipboard->Open()) {
+                    wxTheClipboard->SetData(new wxTextDataObject(stem));
+                    wxTheClipboard->Close();
+                }
+                m_copyNameBtn->SetLabel("Copied!");
+                m_copyNameTimer->Stop();
+                m_copyNameTimer->StartOnce(2000);
+            }
+            break;
         case 'G':
         case 'g':
             if (m_ruleOfThirdsBtn && m_ruleOfThirdsBtn->IsEnabled())
