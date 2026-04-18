@@ -230,6 +230,7 @@ void SortPhotosPanel::BuildSortingUI()
         if (wxTheClipboard->Open()) {
             wxTheClipboard->SetData(new wxTextDataObject(m_activeImagePath));
             wxTheClipboard->Close();
+            LOG_DEBUG("Copied path to clipboard: %s", m_activeImagePath);
         }
     });
     m_progressLabel  = new wxStaticText(this, wxID_ANY, "0/0", wxDefaultPosition, wxSize(60, -1), wxALIGN_RIGHT);
@@ -282,6 +283,7 @@ void SortPhotosPanel::BuildSortingUI()
         if (wxTheClipboard->Open()) {
             wxTheClipboard->SetData(new wxTextDataObject(stem));
             wxTheClipboard->Close();
+            LOG_DEBUG("Copied name to clipboard: %s", stem);
         }
         m_copyNameBtn->SetLabel("Copied!");
         m_copyNameTimer->Stop();
@@ -1648,6 +1650,7 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
                 if (wxTheClipboard->Open()) {
                     wxTheClipboard->SetData(new wxTextDataObject(stem));
                     wxTheClipboard->Close();
+                    LOG_DEBUG("Copied name to clipboard (keybind): %s", stem);
                 }
                 m_copyNameBtn->SetLabel("Copied!");
                 m_copyNameTimer->Stop();
