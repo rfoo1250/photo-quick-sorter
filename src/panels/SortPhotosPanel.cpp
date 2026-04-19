@@ -189,6 +189,8 @@ wxBitmap SortPhotosPanel::LoadKeycap(const wxString& filename, int size) const
 SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
     : wxPanel(parent)
 {
+    m_keyUpFilter = new KeyUpFilter(this);
+    wxEvtHandler::AddFilter(m_keyUpFilter);
     BuildSortingUI();
     Bind(wxEVT_SIZE, &SortPhotosPanel::OnSize, this);
     wxGetTopLevelParent(this)->Bind(wxEVT_CHAR_HOOK, &SortPhotosPanel::OnKeyDown, this);
@@ -284,7 +286,14 @@ void SortPhotosPanel::BuildSortingUI()
     m_copyNameTimer->Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
         if (m_copyNameBtn) m_copyNameBtn->SetLabel("Copy name");
     });
+    m_copyNameBtn->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
+        m_btnMousePressTime = wxGetUTCTimeMillis(); e.Skip();
+    });
     m_copyNameBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        if ((wxGetUTCTimeMillis() - m_btnMousePressTime).GetValue() >= 2000) {
+            LOG_DEBUG("Copy name button held >2s, treating as misclick");
+            return;
+        }
         if (m_activeImagePath.IsEmpty()) return;
         wxString stem = wxFileName(m_activeImagePath).GetName();
         if (wxTheClipboard->Open()) {
@@ -335,12 +344,24 @@ void SortPhotosPanel::BuildSortingUI()
     vSizer->Add(grid, 1, wxEXPAND | wxALL, 8);
     SetSizer(vSizer);
 
-    m_folder1Btn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnFolder1, this);
-    m_folder2Btn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnFolder2, this);
-    m_saveBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnSave,    this);
-    m_deleteBtn ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnDelete,  this);
-    m_undoBtn   ->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnUndo,    this);
-    m_ruleOfThirdsBtn->Bind(wxEVT_BUTTON, &SortPhotosPanel::OnToggleRuleOfThirds, this);
+    auto bindActionBtn = [this](wxButton* btn, auto handler) {
+        btn->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
+            m_btnMousePressTime = wxGetUTCTimeMillis(); e.Skip();
+        });
+        btn->Bind(wxEVT_BUTTON, [this, handler](wxCommandEvent&) {
+            if ((wxGetUTCTimeMillis() - m_btnMousePressTime).GetValue() >= 2000) {
+                LOG_DEBUG("Button held >2s, treating as misclick");
+                return;
+            }
+            wxCommandEvent d; (this->*handler)(d);
+        });
+    };
+    bindActionBtn(m_folder1Btn,     &SortPhotosPanel::OnFolder1);
+    bindActionBtn(m_folder2Btn,     &SortPhotosPanel::OnFolder2);
+    bindActionBtn(m_saveBtn,        &SortPhotosPanel::OnSave);
+    bindActionBtn(m_deleteBtn,      &SortPhotosPanel::OnDelete);
+    bindActionBtn(m_undoBtn,        &SortPhotosPanel::OnUndo);
+    bindActionBtn(m_ruleOfThirdsBtn,&SortPhotosPanel::OnToggleRuleOfThirds);
 
     UpdateGridToggleButton();
     UpdateZoomButtons();
@@ -350,6 +371,9 @@ void SortPhotosPanel::BuildSortingUI()
 
 SortPhotosPanel::~SortPhotosPanel()
 {
+    wxEvtHandler::RemoveFilter(m_keyUpFilter);
+    delete m_keyUpFilter;
+    m_keyUpFilter = nullptr;
     wxWindow* tlw = wxGetTopLevelParent(this);
     if (tlw) tlw->Unbind(wxEVT_CHAR_HOOK, &SortPhotosPanel::OnKeyDown, this);
 }
@@ -1076,6 +1100,8 @@ void SortPhotosPanel::OnAllImagesActedUpon()
         return;
     }
 
+    m_heldKey = 0;
+    m_btnMousePressTime = 0;
     m_inReview = true;
 
     // Destroy sorting UI and null all sorting-UI pointers
@@ -1556,6 +1582,8 @@ void SortPhotosPanel::UpdateGridToggleButton()
 
 void SortPhotosPanel::ShowDoneState()
 {
+    m_heldKey = 0;
+    m_btnMousePressTime = 0;
     m_inReview = true;
     DestroyChildren();
     m_imageViewport  = nullptr;
@@ -1662,11 +1690,15 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
         return;
     }
 
+    // Normalize lowercase to uppercase for action keys
+    const int normKey = (key >= 'a' && key <= 'z') ? key - 32 : key;
+
     if (!m_folder1Btn || !m_folder1Btn->IsEnabled()) {
-        if (key == 'G' || key == 'g') {
-            if (m_ruleOfThirdsBtn && m_ruleOfThirdsBtn->IsEnabled()) {
-                wxCommandEvent dummy;
-                OnToggleRuleOfThirds(dummy);
+        if (normKey == 'G') {
+            if (m_ruleOfThirdsBtn && m_ruleOfThirdsBtn->IsEnabled() && m_heldKey != 'G') {
+                m_heldKey = 'G';
+                m_keyPressTime = wxGetUTCTimeMillis();
+                SetButtonVisualPressed(m_ruleOfThirdsBtn, true);
             }
             return;
         }
@@ -1674,16 +1706,105 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
         return;
     }
 
+    // Arm the button on first press; ignore auto-repeat (same key already held)
+    if (m_heldKey == normKey) return;
+
+    // If a different key is somehow already held, release it cleanly first
+    if (m_heldKey != 0) {
+        SetButtonVisualPressed(KeyToButton(m_heldKey), false);
+        m_heldKey = 0;
+    }
+
+    switch (normKey) {
+        case WXK_LEFT:
+        case WXK_RIGHT:
+        case WXK_UP:
+        case WXK_DOWN:
+        case 'Z':
+        case 'C':
+        case 'G':
+            if (KeyToButton(normKey) && KeyToButton(normKey)->IsEnabled()) {
+                m_heldKey = normKey;
+                m_keyPressTime = wxGetUTCTimeMillis();
+                SetButtonVisualPressed(KeyToButton(normKey), true);
+            }
+            break;
+        default:
+            evt.Skip();
+            break;
+    }
+}
+
+// ─────────────────────────────────────────────
+// Key/button hold tracking
+// ─────────────────────────────────────────────
+
+int SortPhotosPanel::KeyUpFilter::FilterEvent(wxEvent& event)
+{
+    if (event.GetEventType() == wxEVT_KEY_UP)
+        m_owner->HandleKeyUp(static_cast<wxKeyEvent&>(event));
+    return Event_Skip;
+}
+
+void SortPhotosPanel::HandleKeyUp(wxKeyEvent& evt)
+{
+    if (!IsShown() || m_inReview || m_heldKey == 0) return;
+
+    const int key = evt.GetKeyCode();
+    const int normKey = (key >= 'a' && key <= 'z') ? key - 32 : key;
+    if (normKey != m_heldKey) return;
+
+    SetButtonVisualPressed(KeyToButton(m_heldKey), false);
+
+    const wxLongLong elapsed = wxGetUTCTimeMillis() - m_keyPressTime;
+    const int actionKey = m_heldKey;
+    m_heldKey = 0;
+
+    if (elapsed.GetValue() >= 2000) {
+        LOG_DEBUG("Key held %lld ms (>2s), treating as misclick", elapsed.GetValue());
+        return;
+    }
+
+    ExecuteKeyAction(actionKey);
+}
+
+wxButton* SortPhotosPanel::KeyToButton(int key) const
+{
+    switch (key) {
+        case WXK_LEFT:  return m_folder1Btn;
+        case WXK_RIGHT: return m_folder2Btn;
+        case WXK_UP:    return m_saveBtn;
+        case WXK_DOWN:  return m_deleteBtn;
+        case 'Z':       return m_undoBtn;
+        case 'C':       return m_copyNameBtn;
+        case 'G':       return m_ruleOfThirdsBtn;
+        default:        return nullptr;
+    }
+}
+
+void SortPhotosPanel::SetButtonVisualPressed(wxButton* btn, bool pressed)
+{
+    if (!btn) return;
+    if (pressed) {
+        btn->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHT));
+        btn->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHTTEXT));
+    } else {
+        btn->SetBackgroundColour(wxNullColour);
+        btn->SetForegroundColour(wxNullColour);
+    }
+    btn->Refresh();
+}
+
+void SortPhotosPanel::ExecuteKeyAction(int key)
+{
     wxCommandEvent dummy;
     switch (key) {
-        case WXK_LEFT:  OnFolder1(dummy); break;
-        case WXK_RIGHT: OnFolder2(dummy); break;
-        case WXK_UP:    OnSave(dummy);    break;
-        case WXK_DOWN:  OnDelete(dummy);  break;
-        case 'Z':
-        case 'z':       OnUndo(dummy);    break;
+        case WXK_LEFT:  if (m_folder1Btn && m_folder1Btn->IsEnabled())       OnFolder1(dummy); break;
+        case WXK_RIGHT: if (m_folder2Btn && m_folder2Btn->IsEnabled())       OnFolder2(dummy); break;
+        case WXK_UP:    if (m_saveBtn    && m_saveBtn->IsEnabled())          OnSave(dummy);    break;
+        case WXK_DOWN:  if (m_deleteBtn  && m_deleteBtn->IsEnabled())        OnDelete(dummy);  break;
+        case 'Z':       if (m_undoBtn    && m_undoBtn->IsEnabled())          OnUndo(dummy);    break;
         case 'C':
-        case 'c':
             if (m_copyNameBtn && m_copyNameBtn->IsEnabled() && !m_activeImagePath.IsEmpty()) {
                 wxString stem = wxFileName(m_activeImagePath).GetName();
                 if (wxTheClipboard->Open()) {
@@ -1697,10 +1818,8 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
             }
             break;
         case 'G':
-        case 'g':
             if (m_ruleOfThirdsBtn && m_ruleOfThirdsBtn->IsEnabled())
                 OnToggleRuleOfThirds(dummy);
             break;
-        default:        evt.Skip();       break;
     }
 }

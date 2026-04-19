@@ -26,8 +26,19 @@ public:
     explicit SortPhotosPanel(wxWindow* parent);
     ~SortPhotosPanel();
     void RefreshData();
+    void HandleKeyUp(wxKeyEvent& evt);  // called by KeyUpFilter
 
 private:
+    // Global filter to intercept wxEVT_KEY_UP from any focused window
+    class KeyUpFilter : public wxEventFilter {
+    public:
+        explicit KeyUpFilter(SortPhotosPanel* owner) : m_owner(owner) {}
+        int FilterEvent(wxEvent& event) override;
+    private:
+        SortPhotosPanel* m_owner;
+    };
+    KeyUpFilter* m_keyUpFilter = nullptr;
+
     // --- sorting UI (nulled after DestroyChildren) ---
     wxPanel*        m_imageViewport   = nullptr;
     wxStaticBitmap* m_imageBitmap    = nullptr;
@@ -73,6 +84,11 @@ private:
     std::vector<wxString>      m_folder2List;
     std::vector<wxString>      m_deleteList;
 
+    // --- key/button hold tracking ---
+    int        m_heldKey           = 0;  // normalized (WXK_* or uppercase char); 0 = none
+    wxLongLong m_keyPressTime      = 0;  // ms timestamp of key-down
+    wxLongLong m_btnMousePressTime = 0;  // ms timestamp of button mouse-down
+
     // --- review state ---
     bool       m_inReview          = false;
     ReviewStep m_currentReviewStep = ReviewStep::Folder1;
@@ -100,6 +116,11 @@ private:
     void RecordAction(SortAction type);
     void PersistList(const std::vector<wxString>& list, const wxString& filename,
                      const wxString& destDir = wxEmptyString);
+
+    // --- key/button hold helpers ---
+    wxButton* KeyToButton(int key) const;
+    void SetButtonVisualPressed(wxButton* btn, bool pressed);
+    void ExecuteKeyAction(int key);
 
     // --- end-of-session ---
     void OnAllImagesActedUpon();
