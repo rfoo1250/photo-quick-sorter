@@ -297,6 +297,9 @@ void SortPhotosPanel::BuildSortingUI()
         m_copyNameTimer->StartOnce(2000);
     });
 
+    m_fileMetaLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_RIGHT);
+    m_fileMetaLabel->SetForegroundColour(wxColour(100, 100, 100));
+
     wxFlexGridSizer* grid = new wxFlexGridSizer(4, 3, 0, 0);
     grid->AddGrowableRow(1);
     grid->AddGrowableCol(1);
@@ -321,7 +324,7 @@ void SortPhotosPanel::BuildSortingUI()
 
     grid->Add(m_ruleOfThirdsBtn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(m_deleteBtn,  0, wxALL | wxALIGN_CENTER, 8);
-    grid->Add(0, 0);
+    grid->Add(m_fileMetaLabel, 0, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL, 8);
 
     wxBoxSizer* progressRow = new wxBoxSizer(wxHORIZONTAL);
     progressRow->Add(m_progressLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
@@ -860,6 +863,31 @@ void SortPhotosPanel::LoadCurrentImage()
     m_progressLabel->SetLabel(wxString::Format("%zu/%zu", m_currentIndex, total));
     m_imageNameLabel->SetLabel(wxFileName(info->path).GetFullName());
 
+    {
+        wxFileName fn(info->path);
+        wxString type = fn.GetExt().Upper();
+        wxULongLong bytes = fn.GetSize();
+        wxString sizeStr;
+        if (bytes == wxInvalidSize) {
+            sizeStr = "Unknown size";
+        } else if (bytes.GetValue() >= 1024ULL * 1024 * 1024) {
+            sizeStr = wxString::Format("%.1f GB", bytes.GetValue() / (1024.0 * 1024 * 1024));
+        } else if (bytes.GetValue() >= 1024ULL * 1024) {
+            sizeStr = wxString::Format("%.1f MB", bytes.GetValue() / (1024.0 * 1024));
+        } else if (bytes.GetValue() >= 1024ULL) {
+            sizeStr = wxString::Format("%.1f KB", bytes.GetValue() / 1024.0);
+        } else {
+            sizeStr = wxString::Format("%llu B", bytes.GetValue());
+        }
+        wxDateTime dtCreate;
+        wxString dateStr;
+        if (fn.GetTimes(nullptr, nullptr, &dtCreate) && dtCreate.IsValid())
+            dateStr = dtCreate.Format("%Y-%m-%d %H:%M");
+        else
+            dateStr = "Unknown";
+        m_fileMetaLabel->SetLabel(wxString::Format("%s\n%s\n%s", type, sizeStr, dateStr));
+    }
+
     if (m_activeImagePath != info->path) {
         m_activeImagePath = info->path;
         ResetImageZoom();
@@ -1058,6 +1086,7 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
+    m_fileMetaLabel  = nullptr;
     m_folder1Btn  = nullptr;
     m_folder2Btn  = nullptr;
     m_saveBtn     = nullptr;
@@ -1535,6 +1564,7 @@ void SortPhotosPanel::ShowDoneState()
     m_progressBar    = nullptr;
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
+    m_fileMetaLabel  = nullptr;
     m_folder1Btn = m_folder2Btn = m_saveBtn = m_deleteBtn = m_undoBtn = m_ruleOfThirdsBtn = nullptr;
     m_zoomInBtn = m_zoomOutBtn = nullptr;
     m_zoomInShiftHint = m_zoomOutShiftHint = nullptr;

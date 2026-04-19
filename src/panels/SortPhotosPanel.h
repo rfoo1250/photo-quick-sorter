@@ -35,6 +35,7 @@ private:
     wxGauge*        m_progressBar    = nullptr;
     wxStaticText*   m_progressLabel  = nullptr;
     wxStaticText*   m_imageNameLabel = nullptr;
+    wxStaticText*   m_fileMetaLabel  = nullptr;
     wxButton*       m_copyNameBtn   = nullptr;
     wxTimer*        m_copyNameTimer = nullptr;
     wxTimer*        m_copyPathTimer = nullptr;
