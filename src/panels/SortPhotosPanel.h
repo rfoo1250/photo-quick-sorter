@@ -37,6 +37,7 @@ private:
     wxStaticText*   m_imageNameLabel = nullptr;
     wxButton*       m_copyNameBtn   = nullptr;
     wxTimer*        m_copyNameTimer = nullptr;
+    wxTimer*        m_copyPathTimer = nullptr;
     wxButton*       m_folder1Btn    = nullptr;
     wxButton*       m_folder2Btn  = nullptr;
     wxButton*       m_saveBtn     = nullptr;

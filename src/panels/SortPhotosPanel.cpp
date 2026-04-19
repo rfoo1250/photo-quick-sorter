@@ -225,6 +225,10 @@ void SortPhotosPanel::BuildSortingUI()
     m_imageNameLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER | wxST_ELLIPSIZE_END);
     m_imageNameLabel->SetToolTip("Copy path");
     m_imageNameLabel->SetCursor(wxCursor(wxCURSOR_HAND));
+    m_copyPathTimer = new wxTimer();
+    m_copyPathTimer->Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+        if (m_imageNameLabel) m_imageNameLabel->SetLabel(wxFileName(m_activeImagePath).GetFullName());
+    });
     m_imageNameLabel->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) {
         if (m_activeImagePath.IsEmpty()) return;
         if (wxTheClipboard->Open()) {
@@ -232,6 +236,9 @@ void SortPhotosPanel::BuildSortingUI()
             wxTheClipboard->Close();
             LOG_DEBUG("Copied path to clipboard: %s", m_activeImagePath);
         }
+        m_imageNameLabel->SetLabel("Copied path!");
+        m_copyPathTimer->Stop();
+        m_copyPathTimer->StartOnce(2000);
     });
     m_progressLabel  = new wxStaticText(this, wxID_ANY, "0/0", wxDefaultPosition, wxSize(60, -1), wxALIGN_RIGHT);
     m_progressBar    = new wxGauge(this, wxID_ANY, 1, wxDefaultPosition, wxDefaultSize, wxGA_HORIZONTAL | wxGA_SMOOTH);
@@ -1062,6 +1069,7 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     m_zoomInShiftHint = nullptr;
     m_zoomOutShiftHint = nullptr;
     if (m_copyNameTimer) { m_copyNameTimer->Stop(); delete m_copyNameTimer; m_copyNameTimer = nullptr; }
+    if (m_copyPathTimer) { m_copyPathTimer->Stop(); delete m_copyPathTimer; m_copyPathTimer = nullptr; }
     m_copyNameBtn = nullptr;
     m_activeImagePath.clear();
     InvalidateImageRenderCache();
@@ -1531,6 +1539,7 @@ void SortPhotosPanel::ShowDoneState()
     m_zoomInBtn = m_zoomOutBtn = nullptr;
     m_zoomInShiftHint = m_zoomOutShiftHint = nullptr;
     if (m_copyNameTimer) { m_copyNameTimer->Stop(); delete m_copyNameTimer; m_copyNameTimer = nullptr; }
+    if (m_copyPathTimer) { m_copyPathTimer->Stop(); delete m_copyPathTimer; m_copyPathTimer = nullptr; }
     m_copyNameBtn = nullptr;
     m_activeImagePath.clear();
     InvalidateImageRenderCache();
