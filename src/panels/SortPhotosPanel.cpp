@@ -309,14 +309,33 @@ void SortPhotosPanel::BuildSortingUI()
     m_fileMetaLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_RIGHT);
     m_fileMetaLabel->SetForegroundColour(wxColour(100, 100, 100));
 
-    wxFlexGridSizer* grid = new wxFlexGridSizer(4, 3, 0, 0);
-    grid->AddGrowableRow(1);
+    m_helpLabel = new wxStaticText(this, wxID_ANY,
+        "Hold button/key >2s: ignored\n"
+        "Click filename: copy full path\n"
+        "Scroll on image: zoom\n"
+        "Drag on image: pan");
+    {
+        wxFont f = m_helpLabel->GetFont();
+        f.SetPointSize(f.GetPointSize() - 1);
+        m_helpLabel->SetFont(f);
+    }
+    m_helpLabel->SetForegroundColour(wxColour(130, 130, 130));
+
+    wxFlexGridSizer* grid = new wxFlexGridSizer(5, 3, 0, 0);
+    grid->AddGrowableRow(2);
     grid->AddGrowableCol(1);
 
-    grid->Add(m_undoBtn,    0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
-    grid->Add(m_saveBtn,    0, wxALL | wxALIGN_CENTER, 8);
+    // Row 0: undo | save | copy-name
+    grid->Add(m_undoBtn,     0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
+    grid->Add(m_saveBtn,     0, wxALL | wxALIGN_CENTER, 8);
     grid->Add(m_copyNameBtn, 0, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL, 8);
 
+    // Row 1: rule-of-thirds (directly under undo) | spacers
+    grid->Add(m_ruleOfThirdsBtn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
+    grid->Add(0, 0);
+    grid->Add(0, 0);
+
+    // Row 2 (growable): folder1 | image | folder2
     wxBoxSizer* imageCell = new wxBoxSizer(wxVERTICAL);
     imageCell->Add(m_imageNameLabel, 0, wxALIGN_CENTER | wxBOTTOM, 4);
     imageCell->Add(m_imageViewport,  1, wxEXPAND);
@@ -325,14 +344,14 @@ void SortPhotosPanel::BuildSortingUI()
     grid->Add(imageCell,    1, wxEXPAND, 10);
     grid->Add(m_folder2Btn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
 
-    // "Open in Player" row — sits between the media thumbnail and the delete button;
-    // collapses to zero height when the button is hidden (non-video images).
+    // Row 3: "Open in Player" — collapses to zero height for non-video images
     grid->Add(0, 0);
     grid->Add(m_openVideoBtn, 0, wxALIGN_CENTER | wxTOP | wxBOTTOM, 4);
     grid->Add(0, 0);
 
-    grid->Add(m_ruleOfThirdsBtn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
-    grid->Add(m_deleteBtn,  0, wxALL | wxALIGN_CENTER, 8);
+    // Row 4: help text | delete | file metadata
+    grid->Add(m_helpLabel,     0, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 8);
+    grid->Add(m_deleteBtn,     0, wxALL | wxALIGN_CENTER, 8);
     grid->Add(m_fileMetaLabel, 0, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL, 8);
 
     wxBoxSizer* progressRow = new wxBoxSizer(wxHORIZONTAL);
@@ -1113,6 +1132,7 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
     m_fileMetaLabel  = nullptr;
+    m_helpLabel      = nullptr;
     m_folder1Btn  = nullptr;
     m_folder2Btn  = nullptr;
     m_saveBtn     = nullptr;
@@ -1593,6 +1613,7 @@ void SortPhotosPanel::ShowDoneState()
     m_progressLabel  = nullptr;
     m_imageNameLabel = nullptr;
     m_fileMetaLabel  = nullptr;
+    m_helpLabel      = nullptr;
     m_folder1Btn = m_folder2Btn = m_saveBtn = m_deleteBtn = m_undoBtn = m_ruleOfThirdsBtn = nullptr;
     m_zoomInBtn = m_zoomOutBtn = nullptr;
     m_zoomInShiftHint = m_zoomOutShiftHint = nullptr;
