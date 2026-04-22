@@ -51,6 +51,7 @@ private:
     wxButton*       m_copyNameBtn   = nullptr;
     wxTimer*        m_copyNameTimer = nullptr;
     wxTimer*        m_copyPathTimer = nullptr;
+    wxButton*       m_quitBtn     = nullptr;
     wxButton*       m_folder1Btn    = nullptr;
     wxButton*       m_folder2Btn  = nullptr;
     wxButton*       m_saveBtn     = nullptr;
@@ -134,6 +135,7 @@ private:
     void CheckForPendingSession();
 
     // --- helpers ---
+    void     TryQuitToMenu();
     wxBitmap LoadKeycap(const wxString& filename, int size = 28) const;
     wxImage ApplyRuleOfThirdsOverlay(wxImage img) const;
     wxSize GetImageDisplayBounds() const;

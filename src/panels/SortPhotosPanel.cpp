@@ -167,6 +167,65 @@ wxRect BuildImageRect(const wxSize& rendered, const wxPoint2DDouble& offset)
 
 }
 
+void SortPhotosPanel::TryQuitToMenu()
+{
+    static const int ID_SAVE_QUIT    = wxID_HIGHEST + 200;
+    static const int ID_DISCARD_QUIT = wxID_HIGHEST + 201;
+
+    wxDialog dlg(this, wxID_ANY, "Return to Main Menu?",
+                 wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE);
+
+    wxStaticText* msg = new wxStaticText(&dlg, wxID_ANY,
+        "Return to the main menu?\n"
+        "Do you want to save your sort progress?\n"
+        "Saved progress can be resumed next time.");
+
+    wxButton* saveBtn    = new wxButton(&dlg, ID_SAVE_QUIT,    "Yes, save progress");
+    wxButton* discardBtn = new wxButton(&dlg, ID_DISCARD_QUIT, "Yes, do not save progress");
+    wxButton* cancelBtn  = new wxButton(&dlg, wxID_CANCEL,     "No");
+    saveBtn->SetDefault();
+
+    wxBitmap icEnter = LoadKeycap("enter.png");
+    wxBitmap icEsc   = LoadKeycap("esc.png");
+    if (icEnter.IsOk()) { saveBtn->SetBitmap(icEnter);  saveBtn->SetBitmapPosition(wxLEFT);  }
+    if (icEsc.IsOk())   { cancelBtn->SetBitmap(icEsc);  cancelBtn->SetBitmapPosition(wxLEFT); }
+
+    saveBtn->Bind(wxEVT_BUTTON,    [&](wxCommandEvent&) { dlg.EndModal(ID_SAVE_QUIT);    });
+    discardBtn->Bind(wxEVT_BUTTON, [&](wxCommandEvent&) { dlg.EndModal(ID_DISCARD_QUIT); });
+    cancelBtn->Bind(wxEVT_BUTTON,  [&](wxCommandEvent&) { dlg.EndModal(wxID_CANCEL);     });
+
+    wxBoxSizer* btnRow = new wxBoxSizer(wxHORIZONTAL);
+    btnRow->Add(saveBtn,    0, wxALL, 6);
+    btnRow->Add(discardBtn, 0, wxALL, 6);
+    btnRow->Add(cancelBtn,  0, wxALL, 6);
+
+    wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
+    vSizer->Add(msg,    0, wxALL, 16);
+    vSizer->Add(btnRow, 0, wxALIGN_CENTER | wxBOTTOM, 10);
+    dlg.SetSizerAndFit(vSizer);
+    dlg.Centre();
+
+    const int choice = dlg.ShowModal();
+    if (choice == wxID_CANCEL) return;
+
+    auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+    if (!frame) return;
+
+    if (choice == ID_DISCARD_QUIT) {
+        const wxString base = frame->folderLocations.baseFolder;
+        const wxString names[] = {
+            "_pending_folder1.txt", "_pending_folder2.txt", "_pending_deletes.txt"
+        };
+        for (const auto& name : names) {
+            wxString p = base + wxFILE_SEP_PATH + name;
+            if (wxFileExists(p)) wxRemoveFile(p);
+        }
+    }
+    // ID_SAVE_QUIT: pending files are already up to date from PersistList calls
+
+    frame->ShowMainMenuPanel();
+}
+
 wxBitmap SortPhotosPanel::LoadKeycap(const wxString& filename, int size) const
 {
     wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
@@ -245,6 +304,7 @@ void SortPhotosPanel::BuildSortingUI()
     m_progressLabel  = new wxStaticText(this, wxID_ANY, "0/0", wxDefaultPosition, wxSize(60, -1), wxALIGN_RIGHT);
     m_progressBar    = new wxGauge(this, wxID_ANY, 1, wxDefaultPosition, wxDefaultSize, wxGA_HORIZONTAL | wxGA_SMOOTH);
 
+    m_quitBtn    = new wxButton(this, wxID_ANY, "Quit");
     m_folder1Btn = new wxButton(this, ID_SORT_FOLDER1, "Folder 1");
     m_folder2Btn = new wxButton(this, ID_SORT_FOLDER2, "Folder 2");
     m_saveBtn    = new wxButton(this, ID_SORT_SAVE,    "Save");
@@ -259,10 +319,12 @@ void SortPhotosPanel::BuildSortingUI()
     wxBitmap icZ     = LoadKeycap("z.png");
     wxBitmap icC     = LoadKeycap("c.png");
     wxBitmap icG     = LoadKeycap("g.png");
+    wxBitmap icEsc   = LoadKeycap("esc.png");
     wxBitmap icShift = LoadKeycap("shift.png");
     wxBitmap icPlus  = LoadKeycap("equals-plus.png");
     wxBitmap icMinus = LoadKeycap("minus.png");
 
+    if (icEsc.IsOk())   { m_quitBtn->SetBitmap(icEsc);      m_quitBtn->SetBitmapPosition(wxLEFT);    }
     if (icLeft.IsOk())  { m_folder1Btn->SetBitmap(icLeft);  m_folder1Btn->SetBitmapPosition(wxLEFT);  }
     if (icRight.IsOk()) { m_folder2Btn->SetBitmap(icRight); m_folder2Btn->SetBitmapPosition(wxRIGHT); }
     if (icUp.IsOk())    { m_saveBtn->SetBitmap(icUp);       m_saveBtn->SetBitmapPosition(wxTOP);      }
@@ -325,15 +387,15 @@ void SortPhotosPanel::BuildSortingUI()
     grid->AddGrowableRow(2);
     grid->AddGrowableCol(1);
 
-    // Row 0: undo | save | copy-name
-    grid->Add(m_undoBtn,     0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
+    // Row 0: quit | save | copy-name
+    grid->Add(m_quitBtn,     0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(m_saveBtn,     0, wxALL | wxALIGN_CENTER, 8);
     grid->Add(m_copyNameBtn, 0, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL, 8);
 
-    // Row 1: rule-of-thirds (directly under undo) | spacers
+    // Row 1: rule-of-thirds | spacer | undo
     grid->Add(m_ruleOfThirdsBtn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 8);
     grid->Add(0, 0);
-    grid->Add(0, 0);
+    grid->Add(m_undoBtn,     0, wxALL | wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL, 8);
 
     // Row 2 (growable): folder1 | image | folder2
     wxBoxSizer* imageCell = new wxBoxSizer(wxVERTICAL);
@@ -381,6 +443,8 @@ void SortPhotosPanel::BuildSortingUI()
     bindActionBtn(m_deleteBtn,      &SortPhotosPanel::OnDelete);
     bindActionBtn(m_undoBtn,        &SortPhotosPanel::OnUndo);
     bindActionBtn(m_ruleOfThirdsBtn,&SortPhotosPanel::OnToggleRuleOfThirds);
+
+    m_quitBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { TryQuitToMenu(); });
 
     UpdateGridToggleButton();
     UpdateZoomButtons();
@@ -1133,6 +1197,7 @@ void SortPhotosPanel::OnAllImagesActedUpon()
     m_imageNameLabel = nullptr;
     m_fileMetaLabel  = nullptr;
     m_helpLabel      = nullptr;
+    m_quitBtn     = nullptr;
     m_folder1Btn  = nullptr;
     m_folder2Btn  = nullptr;
     m_saveBtn     = nullptr;
@@ -1614,6 +1679,7 @@ void SortPhotosPanel::ShowDoneState()
     m_imageNameLabel = nullptr;
     m_fileMetaLabel  = nullptr;
     m_helpLabel      = nullptr;
+    m_quitBtn = nullptr;
     m_folder1Btn = m_folder2Btn = m_saveBtn = m_deleteBtn = m_undoBtn = m_ruleOfThirdsBtn = nullptr;
     m_zoomInBtn = m_zoomOutBtn = nullptr;
     m_zoomInShiftHint = m_zoomOutShiftHint = nullptr;
@@ -1713,6 +1779,11 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
 
     // Normalize lowercase to uppercase for action keys
     const int normKey = (key >= 'a' && key <= 'z') ? key - 32 : key;
+
+    if (key == WXK_ESCAPE) {
+        TryQuitToMenu();
+        return;
+    }
 
     if (!m_folder1Btn || !m_folder1Btn->IsEnabled()) {
         if (normKey == 'G') {
