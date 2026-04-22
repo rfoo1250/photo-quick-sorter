@@ -39,6 +39,7 @@ private:
     void CancelPendingLoad();
     void OnItemRemove(const wxString& path);
     void OnSize(wxSizeEvent& evt);
+    void OpenInspect(const wxString& path, const wxBitmap& preview);
 
     std::vector<wxString>  m_paths;
     wxString               m_emptyHint;
@@ -50,4 +51,9 @@ private:
     std::vector<std::function<void(const wxBitmap&)>> m_thumbUpdaters;
 
     std::function<void(const wxString&)> m_removeCallback;
+
+    // Inspection overlay — nullptr when no image is being inspected.
+    wxWindow*              m_inspectOverlay = nullptr;
+    // Lifetime guard: reset in destructor so overlay callbacks become no-ops.
+    std::shared_ptr<bool>  m_alive = std::make_shared<bool>(true);
 };
