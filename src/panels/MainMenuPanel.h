@@ -21,6 +21,7 @@ private:
     void OnStartSorting(wxCommandEvent& event);
     void OnBaseFolderFocusLost(wxFocusEvent& event);
     void RefreshPreview(const wxString& folderPath); // internal
+    void RunVideoConversionIfNeeded(const wxString& folderPath);
     wxTextCtrl*    m_baseFolderText = nullptr;
     wxTextCtrl*    m_folder1Text    = nullptr;
     wxTextCtrl*    m_folder2Text    = nullptr;

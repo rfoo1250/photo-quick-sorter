@@ -1,8 +1,11 @@
 #include "utils/logging.h"
 #include "utils/MediaUtils.h"
+#include "utils/VideoConverter.h"
 #include "panels/MainMenuPanel.h"
 #include "ui/PhotoQuickSorterFrame.h"
 #include "core/FolderLocations.h"
+#include <wx/progdlg.h>
+#include <wx/collpane.h>
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
 #include <wx/dir.h>
@@ -209,6 +212,9 @@ void MainMenuPanel::RefreshPreview(const wxString& folderPath)
         return;
     }
 
+    // Convert non-mp4 videos before scanning so thumbnails show the final state
+    RunVideoConversionIfNeeded(folderPath);
+
     // Collect all supported media files (images + videos)
     std::vector<wxString> files;
     wxDir dir(folderPath);
@@ -235,6 +241,219 @@ void MainMenuPanel::RefreshPreview(const wxString& folderPath)
 
     m_thumbnailGrid->SetImages(files);
     Layout();
+}
+
+void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
+{
+    static const int ID_CONVERT = wxID_HIGHEST + 300;
+    static const int ID_SKIP    = wxID_HIGHEST + 301;
+
+    // --- Scan folder directly for non-mp4 video files ---
+    std::vector<wxString> toConvert;
+    {
+        wxDir dir(folderPath);
+        if (!dir.IsOpened()) return;
+        static const wxString specs[] = {
+            "*.mov", "*.avi", "*.mkv", "*.wmv",
+            "*.m4v", "*.flv", "*.webm", "*.mpg", "*.mpeg"
+        };
+        for (const auto& spec : specs) {
+            wxString fn;
+            bool has = dir.GetFirst(&fn, spec, wxDIR_FILES);
+            while (has) {
+                toConvert.push_back(folderPath + wxFILE_SEP_PATH + fn);
+                has = dir.GetNext(&fn);
+            }
+        }
+        std::sort(toConvert.begin(), toConvert.end());
+        toConvert.erase(std::unique(toConvert.begin(), toConvert.end()), toConvert.end());
+    }
+    if (toConvert.empty()) return;
+
+    // --- Check for FFmpeg ---
+    const wxString ffmpegPath = VideoConverter::FindFFmpegPath();
+    if (ffmpegPath.IsEmpty()) {
+        wxMessageBox(
+            wxString::Format(
+                "Found %zu video file(s) that are not in MP4 format, but FFmpeg "
+                "was not found.\n\n"
+                "Install FFmpeg and add it to your PATH to enable automatic "
+                "conversion.\nSorting will continue with the original files. "
+                "Be aware that some videos might have unsupported encodings that "
+                "the default media player can't handle. ",
+                toConvert.size()),
+            "FFmpeg Not Found",
+            wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+
+    // --- Confirmation dialog ---
+    wxString fileListText;
+    for (const auto& p : toConvert)
+        fileListText += wxFileName(p).GetFullName() + "\n";
+
+    wxDialog confirmDlg(this, wxID_ANY, "Convert Videos to MP4",
+                        wxDefaultPosition, wxDefaultSize,
+                        wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
+
+    wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
+
+    wxStaticText* msgText = new wxStaticText(&confirmDlg, wxID_ANY,
+        wxString::Format(
+            "%zu video file(s) are not in MP4 format.\n"
+            "Convert them to MP4 before sorting?\n"
+            "Originals will be deleted after successful conversion.",
+            toConvert.size()));
+    msgText->Wrap(420);
+    vSizer->Add(msgText, 0, wxALL, 16);
+
+    wxTextCtrl* fileList = new wxTextCtrl(&confirmDlg, wxID_ANY,
+        fileListText, wxDefaultPosition, wxSize(420, 120),
+        wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP);
+    vSizer->Add(fileList, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 16);
+
+    wxButton* convertBtn = new wxButton(&confirmDlg, ID_CONVERT,
+                                        "Convert and delete originals");
+    wxButton* skipBtn    = new wxButton(&confirmDlg, ID_SKIP, "Skip");
+
+    wxBitmap icEnter = LoadMenuKeycap("enter.png");
+    wxBitmap icEsc   = LoadMenuKeycap("esc.png");
+    if (icEnter.IsOk()) { convertBtn->SetBitmap(icEnter); convertBtn->SetBitmapPosition(wxLEFT); }
+    if (icEsc.IsOk())   { skipBtn->SetBitmap(icEsc);      skipBtn->SetBitmapPosition(wxLEFT);    }
+    convertBtn->SetDefault();
+
+    convertBtn->Bind(wxEVT_BUTTON, [&](wxCommandEvent&) { confirmDlg.EndModal(ID_CONVERT); });
+    skipBtn->Bind(wxEVT_BUTTON,    [&](wxCommandEvent&) { confirmDlg.EndModal(ID_SKIP);    });
+
+    wxBoxSizer* btnRow = new wxBoxSizer(wxHORIZONTAL);
+    btnRow->Add(convertBtn, 0, wxALL, 8);
+    btnRow->Add(skipBtn,    0, wxALL, 8);
+    vSizer->Add(btnRow, 0, wxALIGN_CENTER | wxBOTTOM, 12);
+
+    confirmDlg.SetSizerAndFit(vSizer);
+    confirmDlg.Centre();
+
+    if (confirmDlg.ShowModal() != ID_CONVERT) return;
+
+    // --- Conversion loop ---
+    wxProgressDialog progress(
+        "Converting Videos", "Preparing...",
+        (int)toConvert.size(), this,
+        wxPD_APP_MODAL | wxPD_CAN_ABORT | wxPD_ELAPSED_TIME | wxPD_AUTO_HIDE);
+
+    struct FailureInfo { wxString name, detail; };
+    std::vector<FailureInfo> failures;
+    bool userCancelled = false;
+
+    for (size_t i = 0; i < toConvert.size(); ++i) {
+        const wxString& srcPath   = toConvert[i];
+        const wxString  shortName = wxFileName(srcPath).GetFullName();
+        const wxString  label     = wxString::Format("Converting %s (%zu/%zu)...",
+                                                      shortName, i + 1, toConvert.size());
+
+        if (!progress.Update((int)i, label)) { userCancelled = true; break; }
+
+        wxString outputPath, errorMsg;
+        bool convCancelled = false;
+
+        bool ok = VideoConverter::ConvertToMp4(ffmpegPath, srcPath, outputPath, errorMsg,
+            [&]() -> bool {
+                bool cont = progress.Update((int)i, label);
+                if (!cont) convCancelled = true;
+                return cont;
+            });
+
+        if (convCancelled) { userCancelled = true; break; }
+
+        if (ok) {
+            if (!wxRemoveFile(srcPath)) {
+                LOG_WARN("RunVideoConversionIfNeeded: converted OK but delete failed: %s", srcPath);
+                failures.push_back({shortName,
+                    "Converted successfully but the original file could not be deleted."});
+            }
+        } else if (errorMsg != "Cancelled.") {
+            LOG_ERROR("RunVideoConversionIfNeeded: %s failed: %s", shortName, errorMsg);
+            failures.push_back({shortName, errorMsg});
+        }
+    }
+
+    progress.Update((int)toConvert.size(), "Done.");
+
+    // --- Report any issues ---
+    if (!failures.empty() || userCancelled) {
+        wxDialog errDlg(this, wxID_ANY, "Conversion Issues",
+                        wxDefaultPosition, wxDefaultSize,
+                        wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
+
+        wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
+
+        // Summary line
+        wxString mainMsg;
+        if (userCancelled)
+            mainMsg = "Conversion was cancelled.\n"
+                      "Already-converted originals have been deleted.";
+        if (!failures.empty()) {
+            if (!mainMsg.IsEmpty()) mainMsg += "\n";
+            mainMsg += wxString::Format("%zu file(s) could not be converted.", failures.size());
+        }
+        mainMsg += "\n\nSorting will continue with the remaining files.";
+
+        wxStaticText* msgText = new wxStaticText(&errDlg, wxID_ANY, mainMsg);
+        msgText->Wrap(400);
+        vSizer->Add(msgText, 0, wxALL, 16);
+
+        if (!failures.empty()) {
+            // Always-visible filename list
+            wxString fileListText;
+            for (const auto& f : failures)
+                fileListText += "- " + f.name + "\n";
+
+            wxTextCtrl* fileListCtrl = new wxTextCtrl(
+                &errDlg, wxID_ANY, fileListText,
+                wxDefaultPosition, wxSize(400, 80),
+                wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP);
+            vSizer->Add(fileListCtrl, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 16);
+
+            // Collapsible FFmpeg output
+            wxString detailsText;
+            for (const auto& f : failures)
+                detailsText += "--- " + f.name + " ---\n" + f.detail + "\n\n";
+
+            wxCollapsiblePane* pane = new wxCollapsiblePane(
+                &errDlg, wxID_ANY, "Details",
+                wxDefaultPosition, wxDefaultSize,
+                wxCP_DEFAULT_STYLE | wxCP_NO_TLW_RESIZE);
+
+            wxBoxSizer* paneSizer = new wxBoxSizer(wxVERTICAL);
+            wxTextCtrl* detailCtrl = new wxTextCtrl(
+                pane->GetPane(), wxID_ANY, detailsText,
+                wxDefaultPosition, wxSize(400, 150),
+                wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP);
+            paneSizer->Add(detailCtrl, 1, wxEXPAND);
+            pane->GetPane()->SetSizer(paneSizer);
+
+            pane->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED,
+                [&errDlg](wxCollapsiblePaneEvent&) {
+                    errDlg.Fit();
+                    errDlg.Layout();
+                });
+
+            vSizer->Add(pane, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 16);
+        }
+
+        wxButton* okBtn = new wxButton(&errDlg, wxID_OK, "OK");
+        wxBitmap icEnter = LoadMenuKeycap("enter.png");
+        if (icEnter.IsOk()) { okBtn->SetBitmap(icEnter); okBtn->SetBitmapPosition(wxLEFT); }
+        okBtn->SetDefault();
+        vSizer->Add(okBtn, 0, wxALIGN_CENTER | wxBOTTOM, 12);
+
+        errDlg.SetSizerAndFit(vSizer);
+        errDlg.Centre();
+        errDlg.ShowModal();
+    }
+
+    // No repo rebuild needed here — RefreshPreview's own scan runs immediately
+    // after this call and will pick up the new .mp4 files.
 }
 
 void MainMenuPanel::OnStartSorting(wxCommandEvent &event)

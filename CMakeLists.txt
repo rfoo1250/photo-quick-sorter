@@ -28,12 +28,14 @@ set(SOURCES
     src/ui/ThumbnailGrid.cpp
     src/core/FolderLocations.cpp
     src/core/ImageRepository.cpp
+    src/utils/VideoConverter.cpp
     src/panels/MainMenuPanel.cpp
     src/panels/SortPhotosPanel.cpp
 )
 set(HEADERS
     src/utils/config.h
     src/utils/MediaUtils.h
+    src/utils/VideoConverter.h
     src/app/PhotoQuickSorterApp.h
     src/ui/PhotoQuickSorterFrame.h
     src/utils/logging.h
