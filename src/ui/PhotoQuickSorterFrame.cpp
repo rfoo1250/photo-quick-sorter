@@ -70,6 +70,10 @@ void PhotoQuickSorterFrame::ShowSortPhotosPanel()
         m_sortPhotosPanel->Show();
     }
     Layout();
+    // Clear the frame's default-button state so Enter is no longer routed to the
+    // main menu's "Start sorting!" button via IsDialogMessage after the panel switch.
+    SetTmpDefaultItem(nullptr);
+    SetDefaultItem(nullptr);
 }
 
 void PhotoQuickSorterFrame::OnSize(wxSizeEvent& evt)

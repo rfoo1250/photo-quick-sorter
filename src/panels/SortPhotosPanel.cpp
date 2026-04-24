@@ -320,6 +320,7 @@ void SortPhotosPanel::BuildSortingUI()
     wxBitmap icC     = LoadKeycap("c.png");
     wxBitmap icG     = LoadKeycap("g.png");
     wxBitmap icEsc   = LoadKeycap("esc.png");
+    wxBitmap icEnter = LoadKeycap("enter.png");
     wxBitmap icShift = LoadKeycap("shift.png");
     wxBitmap icPlus  = LoadKeycap("equals-plus.png");
     wxBitmap icMinus = LoadKeycap("minus.png");
@@ -331,6 +332,7 @@ void SortPhotosPanel::BuildSortingUI()
     if (icDown.IsOk())  { m_deleteBtn->SetBitmap(icDown);   m_deleteBtn->SetBitmapPosition(wxBOTTOM); }
     if (icZ.IsOk())     { m_undoBtn->SetBitmap(icZ);        m_undoBtn->SetBitmapPosition(wxLEFT);     }
     if (icG.IsOk())     { m_ruleOfThirdsBtn->SetBitmap(icG); m_ruleOfThirdsBtn->SetBitmapPosition(wxLEFT); }
+    if (icEnter.IsOk()) { m_openVideoBtn->SetBitmap(icEnter); m_openVideoBtn->SetBitmapPosition(wxLEFT); }
     if (icShift.IsOk()) {
         m_zoomInShiftHint->SetBitmap(icShift);
         m_zoomOutShiftHint->SetBitmap(icShift);
@@ -1821,6 +1823,16 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
                 SetButtonVisualPressed(KeyToButton(normKey), true);
             }
             break;
+        case WXK_RETURN:
+        case WXK_NUMPAD_ENTER:
+            if (m_currentIsVideo && m_openVideoBtn && m_openVideoBtn->IsShown()) {
+                m_heldKey = normKey;
+                m_keyPressTime = wxGetUTCTimeMillis();
+                SetButtonVisualPressed(m_openVideoBtn, true);
+            } else {
+                evt.Skip();
+            }
+            break;
         default:
             evt.Skip();
             break;
@@ -1863,14 +1875,16 @@ void SortPhotosPanel::HandleKeyUp(wxKeyEvent& evt)
 wxButton* SortPhotosPanel::KeyToButton(int key) const
 {
     switch (key) {
-        case WXK_LEFT:  return m_folder1Btn;
-        case WXK_RIGHT: return m_folder2Btn;
-        case WXK_UP:    return m_saveBtn;
-        case WXK_DOWN:  return m_deleteBtn;
-        case 'Z':       return m_undoBtn;
-        case 'C':       return m_copyNameBtn;
-        case 'G':       return m_ruleOfThirdsBtn;
-        default:        return nullptr;
+        case WXK_LEFT:         return m_folder1Btn;
+        case WXK_RIGHT:        return m_folder2Btn;
+        case WXK_UP:           return m_saveBtn;
+        case WXK_DOWN:         return m_deleteBtn;
+        case 'Z':              return m_undoBtn;
+        case 'C':              return m_copyNameBtn;
+        case 'G':              return m_ruleOfThirdsBtn;
+        case WXK_RETURN:
+        case WXK_NUMPAD_ENTER: return m_openVideoBtn;
+        default:               return nullptr;
     }
 }
 
@@ -1912,6 +1926,15 @@ void SortPhotosPanel::ExecuteKeyAction(int key)
         case 'G':
             if (m_ruleOfThirdsBtn && m_ruleOfThirdsBtn->IsEnabled())
                 OnToggleRuleOfThirds(dummy);
+            break;
+        case WXK_RETURN:
+        case WXK_NUMPAD_ENTER:
+            if (m_currentIsVideo && m_openVideoBtn && m_openVideoBtn->IsShown()) {
+                auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+                if (!frame) break;
+                const ImageInfo* info = frame->imageRepo.GetAt(m_currentIndex);
+                if (info) wxLaunchDefaultApplication(info->path);
+            }
             break;
     }
 }
