@@ -62,6 +62,19 @@ bool ShowIconDialog(wxWindow* parent, const wxString& title, const wxString& msg
     return dlg.ShowModal() == wxID_OK;
 }
 
+wxString FriendlyCodecName(const wxString& codec)
+{
+    if (codec == "hevc")        return "HEVC/H.265";
+    if (codec == "vp9")         return "VP9";
+    if (codec == "av1")         return "AV1";
+    if (codec == "vp8")         return "VP8";
+    if (codec == "mpeg4")       return "MPEG-4";
+    if (codec == "mpeg2video")  return "MPEG-2";
+    if (codec == "wmv3")        return "WMV3";
+    if (codec == "theora")      return "Theora";
+    return codec.Upper();
+}
+
 } // namespace
 
 MainMenuPanel::MainMenuPanel(wxWindow *parent)
@@ -248,8 +261,10 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
     static const int ID_CONVERT = wxID_HIGHEST + 300;
     static const int ID_SKIP    = wxID_HIGHEST + 301;
 
-    // --- Scan folder directly for non-mp4 video files ---
-    std::vector<wxString> toConvert;
+    struct ConvertEntry { wxString path, label; bool isMp4; };
+    std::vector<ConvertEntry> toConvert;
+
+    // --- 1. Collect non-MP4 video files (no FFmpeg needed) ---
     {
         wxDir dir(folderPath);
         if (!dir.IsOpened()) return;
@@ -261,36 +276,59 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
             wxString fn;
             bool has = dir.GetFirst(&fn, spec, wxDIR_FILES);
             while (has) {
-                toConvert.push_back(folderPath + wxFILE_SEP_PATH + fn);
+                toConvert.push_back({ folderPath + wxFILE_SEP_PATH + fn, fn, false });
                 has = dir.GetNext(&fn);
             }
         }
-        std::sort(toConvert.begin(), toConvert.end());
-        toConvert.erase(std::unique(toConvert.begin(), toConvert.end()), toConvert.end());
+        std::sort(toConvert.begin(), toConvert.end(),
+                  [](const ConvertEntry& a, const ConvertEntry& b){ return a.path < b.path; });
     }
+
+    // --- 2. Find FFmpeg ---
+    const wxString ffmpegPath = VideoConverter::FindFFmpegPath();
+
+    // --- 3. If FFmpeg/ffprobe available, probe .mp4 files for incompatible codecs ---
+    if (!ffmpegPath.IsEmpty()) {
+        const wxString ffprobePath = VideoConverter::GetFfprobePath(ffmpegPath);
+        if (!ffprobePath.IsEmpty()) {
+            wxBusyCursor busy;
+            wxDir dir(folderPath);
+            if (dir.IsOpened()) {
+                wxString fn;
+                bool has = dir.GetFirst(&fn, "*.mp4", wxDIR_FILES);
+                while (has) {
+                    const wxString fullPath = folderPath + wxFILE_SEP_PATH + fn;
+                    wxString videoCodec, audioCodec;
+                    if (VideoConverter::ProbeCodecs(ffprobePath, fullPath, videoCodec, audioCodec) &&
+                        VideoConverter::NeedsReencoding(videoCodec, audioCodec)) {
+                        const wxString label = fn + " (" + FriendlyCodecName(videoCodec) + " encoding)";
+                        toConvert.push_back({ fullPath, label, true });
+                    }
+                    has = dir.GetNext(&fn);
+                }
+            }
+        }
+    }
+
     if (toConvert.empty()) return;
 
-    // --- Check for FFmpeg ---
-    const wxString ffmpegPath = VideoConverter::FindFFmpegPath();
+    // --- 4. FFmpeg required but not found ---
     if (ffmpegPath.IsEmpty()) {
         wxMessageBox(
             wxString::Format(
-                "Found %zu video file(s) that are not in MP4 format, but FFmpeg "
-                "was not found.\n\n"
-                "Install FFmpeg and add it to your PATH to enable automatic "
-                "conversion.\nSorting will continue with the original files. "
-                "Be aware that some videos might have unsupported encodings that "
-                "the default media player can't handle. ",
+                "Found %zu video file(s) that need conversion, but FFmpeg was not found.\n\n"
+                "Install FFmpeg and add it to your PATH to enable automatic conversion.\n"
+                "Sorting will continue with the original files.",
                 toConvert.size()),
             "FFmpeg Not Found",
             wxOK | wxICON_INFORMATION, this);
         return;
     }
 
-    // --- Confirmation dialog ---
+    // --- 5. Confirmation dialog ---
     wxString fileListText;
-    for (const auto& p : toConvert)
-        fileListText += wxFileName(p).GetFullName() + "\n";
+    for (const auto& e : toConvert)
+        fileListText += "- " + e.label + "\n";
 
     wxDialog confirmDlg(this, wxID_ANY, "Convert Videos to MP4",
                         wxDefaultPosition, wxDefaultSize,
@@ -300,8 +338,7 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
 
     wxStaticText* msgText = new wxStaticText(&confirmDlg, wxID_ANY,
         wxString::Format(
-            "%zu video file(s) are not in MP4 format.\n"
-            "Convert them to MP4 before sorting?\n"
+            "%zu video file(s) will be converted to MP4 (H.264 + AAC).\n"
             "Originals will be deleted after successful conversion.",
             toConvert.size()));
     msgText->Wrap(420);
@@ -335,7 +372,7 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
 
     if (confirmDlg.ShowModal() != ID_CONVERT) return;
 
-    // --- Conversion loop ---
+    // --- 6. Conversion loop ---
     wxProgressDialog progress(
         "Converting Videos", "Preparing...",
         (int)toConvert.size(), this,
@@ -346,10 +383,11 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
     bool userCancelled = false;
 
     for (size_t i = 0; i < toConvert.size(); ++i) {
-        const wxString& srcPath   = toConvert[i];
-        const wxString  shortName = wxFileName(srcPath).GetFullName();
-        const wxString  label     = wxString::Format("Converting %s (%zu/%zu)...",
-                                                      shortName, i + 1, toConvert.size());
+        const ConvertEntry& entry    = toConvert[i];
+        const wxString&     srcPath  = entry.path;
+        const wxString      shortName = wxFileName(srcPath).GetFullName();
+        const wxString      label    = wxString::Format("Converting %s (%zu/%zu)...",
+                                                         shortName, i + 1, toConvert.size());
 
         if (!progress.Update((int)i, label)) { userCancelled = true; break; }
 
@@ -366,10 +404,28 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
         if (convCancelled) { userCancelled = true; break; }
 
         if (ok) {
-            if (!wxRemoveFile(srcPath)) {
-                LOG_WARN("RunVideoConversionIfNeeded: converted OK but delete failed: %s", srcPath);
-                failures.push_back({shortName,
-                    "Converted successfully but the original file could not be deleted."});
+            if (entry.isMp4) {
+                // In-place re-encode: output went to a collision-free temp name.
+                // Delete the original then rename the temp back to the original path.
+                if (!wxRemoveFile(srcPath)) {
+                    LOG_WARN("RunVideoConversionIfNeeded: delete original failed: %s", srcPath);
+                    failures.push_back({shortName,
+                        "Re-encoded successfully but the original file could not be deleted.\n"
+                        "The re-encoded copy is at: " + outputPath});
+                } else if (!wxRenameFile(outputPath, srcPath)) {
+                    LOG_WARN("RunVideoConversionIfNeeded: rename failed: %s -> %s",
+                             outputPath, srcPath);
+                    failures.push_back({shortName,
+                        "Re-encoded successfully but the file could not be renamed.\n"
+                        "The re-encoded copy is at: " + outputPath});
+                }
+            } else {
+                // Non-MP4: output already has the correct .mp4 name; just remove original.
+                if (!wxRemoveFile(srcPath)) {
+                    LOG_WARN("RunVideoConversionIfNeeded: delete original failed: %s", srcPath);
+                    failures.push_back({shortName,
+                        "Converted successfully but the original file could not be deleted."});
+                }
             }
         } else if (errorMsg != "Cancelled.") {
             LOG_ERROR("RunVideoConversionIfNeeded: %s failed: %s", shortName, errorMsg);
@@ -379,7 +435,7 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
 
     progress.Update((int)toConvert.size(), "Done.");
 
-    // --- Report any issues ---
+    // --- 7. Report any issues ---
     if (!failures.empty() || userCancelled) {
         wxDialog errDlg(this, wxID_ANY, "Conversion Issues",
                         wxDefaultPosition, wxDefaultSize,
@@ -387,7 +443,6 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
 
         wxBoxSizer* vSizer = new wxBoxSizer(wxVERTICAL);
 
-        // Summary line
         wxString mainMsg;
         if (userCancelled)
             mainMsg = "Conversion was cancelled.\n"
@@ -403,7 +458,6 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
         vSizer->Add(msgText, 0, wxALL, 16);
 
         if (!failures.empty()) {
-            // Always-visible filename list
             wxString fileListText;
             for (const auto& f : failures)
                 fileListText += "- " + f.name + "\n";
@@ -414,7 +468,6 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
                 wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP);
             vSizer->Add(fileListCtrl, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 16);
 
-            // Collapsible FFmpeg output
             wxString detailsText;
             for (const auto& f : failures)
                 detailsText += "--- " + f.name + " ---\n" + f.detail + "\n\n";
@@ -452,8 +505,8 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
         errDlg.ShowModal();
     }
 
-    // No repo rebuild needed here — RefreshPreview's own scan runs immediately
-    // after this call and will pick up the new .mp4 files.
+    // No repo rebuild needed — RefreshPreview's own scan runs immediately after
+    // this call and will pick up the new .mp4 files.
 }
 
 void MainMenuPanel::OnStartSorting(wxCommandEvent &event)

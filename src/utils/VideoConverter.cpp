@@ -78,6 +78,86 @@ wxString VideoConverter::FindFFmpegPath()
 }
 
 // ─────────────────────────────────────────────
+// GetFfprobePath
+// ─────────────────────────────────────────────
+
+wxString VideoConverter::GetFfprobePath(const wxString& ffmpegPath)
+{
+    // If ffmpeg is a full path, swap the binary name to ffprobe
+    if (ffmpegPath != "ffmpeg") {
+        wxFileName fn(ffmpegPath);
+        fn.SetName("ffprobe");
+        wxString candidate = fn.GetFullPath();
+        if (wxFileExists(candidate))
+            return candidate;
+    }
+
+    // ffmpeg was found in PATH — check if ffprobe is there too
+    wxArrayString out, err;
+    int ret = wxExecute("ffprobe -version", out, err,
+                        wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
+    if (ret == 0)
+        return "ffprobe";
+
+    return wxString();
+}
+
+// ─────────────────────────────────────────────
+// ProbeCodecs
+// ─────────────────────────────────────────────
+
+bool VideoConverter::ProbeCodecs(const wxString& ffprobePath,
+                                  const wxString& filePath,
+                                  wxString& videoCodec,
+                                  wxString& audioCodec)
+{
+    const wxString base = wxString::Format(
+        "\"%s\" -v error -show_entries stream=codec_name "
+        "-of default=noprint_wrappers=1:nokey=1 ", ffprobePath);
+
+    // Video stream
+    {
+        wxArrayString out, err;
+        wxString cmd = base + "-select_streams v:0 \"" + filePath + "\"";
+        int ret = wxExecute(cmd, out, err, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
+        if (ret != 0 || out.IsEmpty()) return false;
+        videoCodec = out[0].Lower().Trim().Trim(false);
+    }
+
+    // Audio stream (no audio is valid — treat non-zero exit as "no audio")
+    {
+        wxArrayString out, err;
+        wxString cmd = base + "-select_streams a:0 \"" + filePath + "\"";
+        wxExecute(cmd, out, err, wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
+        if (!out.IsEmpty())
+            audioCodec = out[0].Lower().Trim().Trim(false);
+    }
+
+    return !videoCodec.IsEmpty();
+}
+
+// ─────────────────────────────────────────────
+// NeedsReencoding
+// ─────────────────────────────────────────────
+
+bool VideoConverter::NeedsReencoding(const wxString& videoCodec,
+                                      const wxString& audioCodec)
+{
+    if (videoCodec.IsEmpty()) return false; // can't determine — leave it alone
+
+    // Windows Media Player supports H.264 natively; everything else may require
+    // a paid codec pack (HEVC, VP9, AV1, etc.)
+    const bool videoOk = (videoCodec == "h264");
+
+    // AAC and MP3 are universally supported; empty means no audio stream
+    const bool audioOk = audioCodec.IsEmpty()
+                      || audioCodec == "aac"
+                      || audioCodec == "mp3";
+
+    return !videoOk || !audioOk;
+}
+
+// ─────────────────────────────────────────────
 // ConvertToMp4
 // ─────────────────────────────────────────────
 
