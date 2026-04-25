@@ -16,8 +16,14 @@ namespace {
 
 wxBitmap LoadMenuKeycap(const wxString& filename) {
     wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
-    exe.Normalize(); exe.SetFullName(""); exe.RemoveLastDir(); exe.RemoveLastDir();
+    exe.Normalize(); exe.SetFullName("");
+    // Installed: assets/ next to the exe
     wxString path = exe.GetFullPath() + "assets/single-keys-blank/200dpi/" + filename;
+    if (!wxFileExists(path)) {
+        // Dev: CMake puts exe in build/{Config}/, project root is 2 levels up
+        wxFileName dev = exe; dev.RemoveLastDir(); dev.RemoveLastDir();
+        path = dev.GetFullPath() + "assets/single-keys-blank/200dpi/" + filename;
+    }
     if (!wxFileExists(path)) return wxNullBitmap;
     wxImage img(path, wxBITMAP_TYPE_PNG);
     if (!img.IsOk()) return wxNullBitmap;

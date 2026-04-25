@@ -5,6 +5,7 @@
 #include <wx/filefn.h>
 #include <wx/filename.h>
 #include <wx/arrstr.h>
+#include <wx/stdpaths.h>
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -47,6 +48,17 @@ wxString BuildOutputPath(const wxString& inputPath)
 
 wxString VideoConverter::FindFFmpegPath()
 {
+    // 0. Bundled: {exe_dir}\bin\ffmpeg.exe (installer places it here)
+    {
+        wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
+        exe.SetFullName(""); exe.Normalize();
+        wxString bundled = exe.GetFullPath() + "bin\\ffmpeg.exe";
+        if (wxFileExists(bundled) && ProbeFFmpeg(bundled)) {
+            LOG_DEBUG("VideoConverter: ffmpeg found at bundled path: %s", bundled);
+            return bundled;
+        }
+    }
+
     // 1. "ffmpeg" in PATH
     {
         wxArrayString out, err;

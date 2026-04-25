@@ -5,6 +5,8 @@ CMakeCache.txt
 *.vcxproj
 *.sln
 
+# Git
+.github/issues/
 
 # Misch.
 tree.txt
