@@ -6,6 +6,7 @@
 #include <wx/statbmp.h>
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
+#include <wx/utils.h>
 #include <algorithm>
 #include <cmath>
 #include <thread>
@@ -578,6 +579,7 @@ public:
         // Positioned manually over the image on hover.
         m_undoBtn = new wxButton(this, wxID_ANY, "Undo");
         m_undoBtn->SetBackgroundColour(wxColour(255, 255, 255));
+        m_undoBtn->SetCursor(wxCursor(wxCURSOR_HAND));
         m_undoBtn->Hide();
 
         m_undoBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
@@ -697,6 +699,132 @@ private:
     wxTimer         m_hoverTimer;
     wxString        m_path;
     std::function<void(const wxString&)> m_onRemove;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VideoThumb — plain-mode video cell with hover-reveal "Open in Player" button.
+// Mirrors RemovableThumb's hover mechanics: timer-based polling, dim on hover,
+// button centered over the thumbnail image.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class VideoThumb : public wxPanel {
+public:
+    VideoThumb(wxWindow* parent, int thumbSize, const wxString& path)
+        : wxPanel(parent, wxID_ANY)
+        , m_path(path)
+        , m_hoverTimer(this)
+    {
+        m_thumb = new ThumbDisplay(this, thumbSize);
+        m_thumb->SetBitmap(MakePlaceholder(thumbSize));
+
+        m_label = new wxStaticText(this, wxID_ANY,
+            wxFileName(path).GetFullName(),
+            wxDefaultPosition, wxSize(thumbSize, -1),
+            wxALIGN_CENTER | wxST_ELLIPSIZE_END);
+
+        wxBoxSizer* sz = new wxBoxSizer(wxVERTICAL);
+        sz->Add(m_thumb, 0, wxALIGN_CENTER | wxBOTTOM, 3);
+        sz->Add(m_label, 0, wxALIGN_CENTER);
+        SetSizer(sz);
+
+        // Play button: NOT in sizer, positioned manually over the thumbnail on hover.
+        m_playBtn = new wxButton(this, wxID_ANY, "Open in Player");
+        m_playBtn->SetBackgroundColour(wxColour(255, 255, 255));
+        m_playBtn->SetCursor(wxCursor(wxCURSOR_HAND));
+        m_playBtn->Hide();
+        m_playBtn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+            wxLaunchDefaultApplication(m_path);
+        });
+
+        m_hoverTimer.Bind(wxEVT_TIMER, &VideoThumb::OnHoverTimer, this);
+
+        BindHover(this);
+        BindHover(m_thumb);
+        BindHover(m_label);
+        BindHover(m_playBtn);
+    }
+
+    void SetThumbBitmap(const wxBitmap& bmp)
+    {
+        m_normalBmp = bmp;
+        m_dimBmp    = MakeDim(bmp);
+        m_thumb->SetBitmap((m_hovered && m_dimBmp.IsOk()) ? m_dimBmp : m_normalBmp);
+    }
+
+private:
+    void BindHover(wxWindow* w)
+    {
+        w->Bind(wxEVT_ENTER_WINDOW, &VideoThumb::OnEnter, this);
+        w->Bind(wxEVT_LEAVE_WINDOW, &VideoThumb::OnLeave, this);
+    }
+
+    void OnHoverTimer(wxTimerEvent&)
+    {
+        wxPoint pos = ScreenToClient(wxGetMousePosition());
+        if (GetClientRect().Contains(pos)) {
+            SetHovered(true);
+            m_hoverTimer.StartOnce(40);
+        } else {
+            SetHovered(false);
+        }
+    }
+
+    void OnEnter(wxMouseEvent& evt)
+    {
+        evt.Skip();
+        wxPoint pos = ScreenToClient(wxGetMousePosition());
+        if (GetClientRect().Contains(pos)) {
+            SetHovered(true);
+            if (!m_hoverTimer.IsRunning())
+                m_hoverTimer.StartOnce(40);
+        }
+    }
+
+    void OnLeave(wxMouseEvent& evt)
+    {
+        evt.Skip();
+        wxPoint pos = ScreenToClient(wxGetMousePosition());
+        if (!GetClientRect().Contains(pos)) {
+            m_hoverTimer.Stop();
+            SetHovered(false);
+        } else if (!m_hoverTimer.IsRunning()) {
+            m_hoverTimer.StartOnce(40);
+        }
+    }
+
+    void SetHovered(bool hovered)
+    {
+        if (m_hovered == hovered) return;
+        m_hovered = hovered;
+
+        if (hovered) {
+            if (m_dimBmp.IsOk())
+                m_thumb->SetBitmap(m_dimBmp);
+
+            wxPoint tPos  = m_thumb->GetPosition();
+            wxSize  tSize = m_thumb->GetSize();
+            wxSize  bSize = m_playBtn->GetBestSize();
+            m_playBtn->SetSize(
+                tPos.x + (tSize.x - bSize.x) / 2,
+                tPos.y + (tSize.y - bSize.y) / 2,
+                bSize.x, bSize.y);
+            m_playBtn->Show();
+            m_playBtn->Raise();
+        } else {
+            if (m_normalBmp.IsOk())
+                m_thumb->SetBitmap(m_normalBmp);
+            m_playBtn->Hide();
+        }
+    }
+
+    ThumbDisplay*   m_thumb   = nullptr;
+    wxStaticText*   m_label   = nullptr;
+    wxButton*       m_playBtn = nullptr;
+    wxBitmap        m_normalBmp;
+    wxBitmap        m_dimBmp;
+    bool            m_hovered = false;
+    wxTimer         m_hoverTimer;
+    wxString        m_path;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -821,32 +949,36 @@ void ThumbnailGrid::Rebuild()
             grid->Add(cell, 0, wxALIGN_TOP | wxALIGN_CENTER_HORIZONTAL | wxALL, 4);
         }
     } else {
-        // Plain mode: static cells
+        // Plain mode: image cells are inspectable; video cells use VideoThumb (hover-reveal button).
         wxBitmap placeholder = MakePlaceholder(thumbSize);
         for (const wxString& path : m_paths) {
-            ThumbDisplay* thumb = new ThumbDisplay(this, thumbSize);
-            thumb->SetBitmap(placeholder);
-            m_thumbUpdaters.push_back([thumb](const wxBitmap& b) {
-                thumb->SetBitmap(b);
-            });
-
-            // Images (not videos) are inspectable: hand cursor + click to inspect.
-            if (!MediaUtils::IsVideoFile(path)) {
+            if (MediaUtils::IsVideoFile(path)) {
+                VideoThumb* cell = new VideoThumb(this, thumbSize, path);
+                m_thumbUpdaters.push_back([cell](const wxBitmap& b) {
+                    cell->SetThumbBitmap(b);
+                });
+                grid->Add(cell, 0, wxALIGN_TOP | wxALIGN_CENTER_HORIZONTAL | wxALL, 4);
+            } else {
+                ThumbDisplay* thumb = new ThumbDisplay(this, thumbSize);
+                thumb->SetBitmap(placeholder);
+                m_thumbUpdaters.push_back([thumb](const wxBitmap& b) {
+                    thumb->SetBitmap(b);
+                });
                 thumb->SetCursor(wxCursor(wxCURSOR_HAND));
                 thumb->Bind(wxEVT_LEFT_DOWN, [this, thumb, path](wxMouseEvent&) {
                     OpenInspect(path, thumb->GetBitmap());
                 });
+
+                wxStaticText* lbl = new wxStaticText(this, wxID_ANY,
+                    wxFileName(path).GetFullName(),
+                    wxDefaultPosition, wxSize(thumbSize, -1),
+                    wxALIGN_CENTER | wxST_ELLIPSIZE_END);
+
+                wxBoxSizer* cell = new wxBoxSizer(wxVERTICAL);
+                cell->Add(thumb, 0, wxALIGN_CENTER | wxBOTTOM, 3);
+                cell->Add(lbl,   0, wxALIGN_CENTER);
+                grid->Add(cell, 0, wxALIGN_TOP | wxALIGN_CENTER_HORIZONTAL | wxALL, 4);
             }
-
-            wxStaticText* lbl = new wxStaticText(this, wxID_ANY,
-                wxFileName(path).GetFullName(),
-                wxDefaultPosition, wxSize(thumbSize, -1),
-                wxALIGN_CENTER | wxST_ELLIPSIZE_END);
-
-            wxBoxSizer* cell = new wxBoxSizer(wxVERTICAL);
-            cell->Add(thumb, 0, wxALIGN_CENTER | wxBOTTOM, 3);
-            cell->Add(lbl,   0, wxALIGN_CENTER);
-            grid->Add(cell, 0, wxALIGN_TOP | wxALIGN_CENTER_HORIZONTAL | wxALL, 4);
         }
     }
 
