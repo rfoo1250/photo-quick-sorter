@@ -96,9 +96,7 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
 
     // --- Controls ---
     wxStaticText *baseFolderNameLabel = new wxStaticText(this, wxID_ANY, "Base Folder path:");
-    wxString defaultBase = wxStandardPaths::Get().GetUserDir(wxStandardPaths::Dir_Pictures);
-    if (!wxDir::Exists(defaultBase)) defaultBase.Clear();
-    m_baseFolderText = new wxTextCtrl(this, wxID_ANY, defaultBase, wxDefaultPosition, wxSize(400, -1));
+    m_baseFolderText = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(400, -1));
     wxButton *baseFolderNameBrowseBtn = new wxButton(this, ID_BROWSE_BASE, "Browse");
 
     wxStaticText *folder1NameLabel = new wxStaticText(this, wxID_ANY, "Folder 1 path:");
@@ -167,14 +165,24 @@ void MainMenuPanel::OnBrowseFolder(wxCommandEvent &event)
 {
     int id = event.GetId();
 
-    // For folder 1 & 2, start at the parent of the base folder if one is set
     wxString startDir;
-    if (id == ID_BROWSE_1 || id == ID_BROWSE_2) {
+    if (id == ID_BROWSE_BASE) {
+        // Start the dialog at Pictures when the field is empty — a convenient
+        // default without pre-filling the text box (which would trigger scans).
+        wxString cur = m_baseFolderText->GetValue().Trim(true).Trim(false);
+        if (cur.IsEmpty()) {
+            wxString pics = wxStandardPaths::Get().GetUserDir(wxStandardPaths::Dir_Pictures);
+            if (wxDir::Exists(pics)) startDir = pics;
+        } else {
+            startDir = cur;
+        }
+    } else {
+        // For folder 1 & 2, start at the parent of the base folder if one is set
         wxString base = m_baseFolderText->GetValue().Trim(true).Trim(false);
         if (!base.IsEmpty()) {
             wxFileName fn(base);
             fn.Normalize();
-            startDir = fn.GetPath(); // parent directory
+            startDir = fn.GetPath();
         }
     }
 

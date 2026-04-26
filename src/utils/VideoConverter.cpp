@@ -48,6 +48,11 @@ wxString BuildOutputPath(const wxString& inputPath)
 
 wxString VideoConverter::FindFFmpegPath()
 {
+    static bool     s_initialized = false;
+    static wxString s_cached;
+    if (s_initialized) return s_cached;
+    s_initialized = true;
+
     // 0. Bundled: {exe_dir}\bin\ffmpeg.exe (installer places it here)
     {
         wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
@@ -55,7 +60,8 @@ wxString VideoConverter::FindFFmpegPath()
         wxString bundled = exe.GetFullPath() + "bin\\ffmpeg.exe";
         if (wxFileExists(bundled) && ProbeFFmpeg(bundled)) {
             LOG_DEBUG("VideoConverter: ffmpeg found at bundled path: %s", bundled);
-            return bundled;
+            s_cached = bundled;
+            return s_cached;
         }
     }
 
@@ -66,7 +72,8 @@ wxString VideoConverter::FindFFmpegPath()
                             wxEXEC_SYNC | wxEXEC_HIDE_CONSOLE);
         if (ret == 0) {
             LOG_DEBUG("VideoConverter: ffmpeg found in PATH");
-            return "ffmpeg";
+            s_cached = "ffmpeg";
+            return s_cached;
         }
     }
 
@@ -81,12 +88,13 @@ wxString VideoConverter::FindFFmpegPath()
     for (const auto& p : knownPaths) {
         if (wxFileExists(p) && ProbeFFmpeg(p)) {
             LOG_DEBUG("VideoConverter: ffmpeg found at %s", p);
-            return p;
+            s_cached = p;
+            return s_cached;
         }
     }
 
     LOG_DEBUG("VideoConverter: ffmpeg not found");
-    return wxString();
+    return s_cached; // empty
 }
 
 // ─────────────────────────────────────────────
