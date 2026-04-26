@@ -517,6 +517,8 @@ void MainMenuPanel::RunVideoConversionIfNeeded(const wxString& folderPath)
 
 void MainMenuPanel::OnStartSorting(wxCommandEvent &event)
 {
+    if (!IsShown()) return;
+
     LOG_DEBUG("Start sorting button pressed");
 
     auto *frame = dynamic_cast<PhotoQuickSorterFrame *>(GetParent());

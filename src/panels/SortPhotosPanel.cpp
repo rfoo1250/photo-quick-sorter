@@ -472,6 +472,8 @@ SortPhotosPanel::~SortPhotosPanel()
 
 void SortPhotosPanel::RefreshData()
 {
+    m_panelActiveSince = wxGetUTCTimeMillis();
+
     auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
     if (!frame) return;
 
@@ -1750,6 +1752,7 @@ void SortPhotosPanel::OnKeyDown(wxKeyEvent& evt)
     }
 
     const int key = evt.GetKeyCode();
+
     const wxChar unicode = (wxChar)evt.GetUnicodeKey();
     const bool zoomInKey = key == WXK_ADD || key == WXK_NUMPAD_ADD ||
                            unicode == '+' || (key == '=' && evt.ShiftDown());
@@ -1855,10 +1858,33 @@ int SortPhotosPanel::KeyUpFilter::FilterEvent(wxEvent& event)
 
 void SortPhotosPanel::HandleKeyUp(wxKeyEvent& evt)
 {
-    if (!IsShown() || m_inReview || m_heldKey == 0) return;
-
     const int key = evt.GetKeyCode();
     const int normKey = (key >= 'a' && key <= 'z') ? key - 32 : key;
+
+    if (!IsShown() || m_inReview) return;
+
+    // IsDialogMessage consumes WM_KEYDOWN for Enter before wxEVT_CHAR_HOOK is
+    // generated, so OnKeyDown never arms m_heldKey for Enter. Since WM_KEYUP is
+    // never intercepted by IsDialogMessage, we can reliably execute on key-up.
+    if (m_heldKey == 0 && (normKey == WXK_RETURN || normKey == WXK_NUMPAD_ENTER)) {
+        // Discard key-up events that trail from pressing Enter on a previous panel
+        // (e.g. the "Start sorting!" button). That event arrives within a few ms of
+        // the panel switch; an intentional press takes at least 200 ms.
+        if ((wxGetUTCTimeMillis() - m_panelActiveSince).GetValue() < 150)
+            return;
+        if (m_currentIsVideo && m_openVideoBtn && m_openVideoBtn->IsShown()) {
+            SetButtonVisualPressed(m_openVideoBtn, true);
+            CallAfter([this]() { if (m_openVideoBtn) SetButtonVisualPressed(m_openVideoBtn, false); });
+            auto* frame = dynamic_cast<PhotoQuickSorterFrame*>(GetParent());
+            if (frame) {
+                const ImageInfo* info = frame->imageRepo.GetAt(m_currentIndex);
+                if (info) wxLaunchDefaultApplication(info->path);
+            }
+        }
+        return;
+    }
+
+    if (m_heldKey == 0) return;
     if (normKey != m_heldKey) return;
 
     SetButtonVisualPressed(KeyToButton(m_heldKey), false);

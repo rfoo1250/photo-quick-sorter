@@ -90,6 +90,7 @@ private:
     int        m_heldKey           = 0;  // normalized (WXK_* or uppercase char); 0 = none
     wxLongLong m_keyPressTime      = 0;  // ms timestamp of key-down
     wxLongLong m_btnMousePressTime = 0;  // ms timestamp of button mouse-down
+    wxLongLong m_panelActiveSince  = 0;  // ms timestamp of last RefreshData()
 
     // --- review state ---
     bool       m_inReview          = false;
