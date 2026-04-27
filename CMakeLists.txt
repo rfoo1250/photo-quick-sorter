@@ -42,6 +42,8 @@ set(HEADERS
     src/ui/LogWindow.h
     src/ui/Toast.h
     src/ui/ThumbnailGrid.h
+    src/ui/Theme.h
+    src/ui/StyledButton.h
     src/core/FolderLocations.h
     src/core/ImageRepository.h
     src/panels/MainMenuPanel.h

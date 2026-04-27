@@ -3,6 +3,8 @@
 #include "utils/VideoConverter.h"
 #include "panels/MainMenuPanel.h"
 #include "ui/PhotoQuickSorterFrame.h"
+#include "ui/Theme.h"
+#include "ui/StyledButton.h"
 #include "core/FolderLocations.h"
 #include <wx/progdlg.h>
 #include <wx/collpane.h>
@@ -86,6 +88,8 @@ wxString FriendlyCodecName(const wxString& codec)
 MainMenuPanel::MainMenuPanel(wxWindow *parent)
     : wxPanel(parent)
 {
+    SetBackgroundColour(Theme::BgPanel);
+
     // Project root for image path
     wxFileName exeFile(wxStandardPaths::Get().GetExecutablePath());
     wxFileName projectRoot = exeFile;
@@ -96,20 +100,33 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
 
     // --- Controls ---
     wxStaticText *baseFolderNameLabel = new wxStaticText(this, wxID_ANY, "Base Folder path:");
+    baseFolderNameLabel->SetFont(Theme::FontBody());
     m_baseFolderText = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(400, -1));
     wxButton *baseFolderNameBrowseBtn = new wxButton(this, ID_BROWSE_BASE, "Browse");
 
     wxStaticText *folder1NameLabel = new wxStaticText(this, wxID_ANY, "Folder 1 path:");
+    folder1NameLabel->SetFont(Theme::FontBody());
     m_folder1Text = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(400, -1));
     wxButton *folder1NameBrowseBtn = new wxButton(this, ID_BROWSE_1, "Browse");
 
     wxStaticText *folder2NameLabel = new wxStaticText(this, wxID_ANY, "Folder 2 path:");
+    folder2NameLabel->SetFont(Theme::FontBody());
     m_folder2Text = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(400, -1));
     wxButton *folder2NameBrowseBtn = new wxButton(this, ID_BROWSE_2, "Browse");
     // image test
     // wxString imagePath = projectRoot.GetFullPath() + "/assets/Nice_Nature.jpeg";
 
-    wxButton *toSortPanelBtn = new wxButton(this, ID_TO_SORT_PANEL, "Start sorting!");
+    auto *toSortPanelBtn = new StyledButton(this, ID_TO_SORT_PANEL, "Start sorting!",
+                                             Theme::Accent, Theme::AccentText);
+    toSortPanelBtn->SetFont(Theme::MakeFont(11, wxFONTWEIGHT_SEMIBOLD));
+    {
+        wxBitmap ic = LoadMenuKeycap("enter.png");
+        if (ic.IsOk()) {
+            wxImage img = ic.ConvertToImage();
+            img = img.Scale(20, 20, wxIMAGE_QUALITY_HIGH);
+            toSortPanelBtn->SetBitmap(wxBitmap(img));
+        }
+    }
 
     // --- Layout setup ---
     wxBoxSizer *vbox = new wxBoxSizer(wxVERTICAL);
@@ -117,10 +134,10 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     auto makeRow = [&](wxStaticText *label, wxTextCtrl *text, wxButton *button)
     {
         wxBoxSizer *hbox = new wxBoxSizer(wxHORIZONTAL);
-        hbox->Add(label, 0, wxALL, 5);
-        hbox->Add(text, 1, wxALL, 5);
-        hbox->Add(button, 0, wxALL, 5);
-        vbox->Add(hbox, 0, wxEXPAND | wxALL, 5);
+        hbox->Add(label, 0, wxALIGN_CENTER_VERTICAL | wxALL, Theme::PadSmall);
+        hbox->Add(text, 1, wxALIGN_CENTER_VERTICAL | wxALL, Theme::PadSmall);
+        hbox->Add(button, 0, wxALIGN_CENTER_VERTICAL | wxALL, Theme::PadSmall);
+        vbox->Add(hbox, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, Theme::PadMedium);
     };
 
     makeRow(baseFolderNameLabel, m_baseFolderText, baseFolderNameBrowseBtn);
@@ -148,8 +165,8 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
 
     // --- Base folder preview ---
     m_thumbnailGrid = new ThumbnailGrid(this, "Select a Base Folder to preview media.");
-    vbox->Add(m_thumbnailGrid, 1, wxEXPAND | wxALL, 5);
-    vbox->Add(toSortPanelBtn, 0, wxEXPAND | wxALL, 8);
+    vbox->Add(m_thumbnailGrid, 1, wxEXPAND | wxALL, Theme::PadMedium);
+    vbox->Add(toSortPanelBtn, 0, wxEXPAND | wxALL, Theme::PadMedium);
     SetSizer(vbox);
 
     // --- Events ---
@@ -158,6 +175,17 @@ MainMenuPanel::MainMenuPanel(wxWindow *parent)
     folder2NameBrowseBtn->Bind(wxEVT_BUTTON, &MainMenuPanel::OnBrowseFolder, this);
     toSortPanelBtn->Bind(wxEVT_BUTTON, &MainMenuPanel::OnStartSorting, this);
     m_baseFolderText->Bind(wxEVT_KILL_FOCUS, &MainMenuPanel::OnBaseFolderFocusLost, this);
+
+    // Enter key from any focused child fires Start sorting
+    Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent& e) {
+        if (e.GetKeyCode() == WXK_RETURN) {
+            wxCommandEvent cmd(wxEVT_BUTTON, ID_TO_SORT_PANEL);
+            cmd.SetEventObject(this);
+            OnStartSorting(cmd);
+        } else {
+            e.Skip();
+        }
+    });
 
 }
 

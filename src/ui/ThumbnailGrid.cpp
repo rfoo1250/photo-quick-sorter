@@ -1,4 +1,5 @@
 #include "ui/ThumbnailGrid.h"
+#include "ui/Theme.h"
 #include "utils/MediaUtils.h"
 #include "utils/logging.h"
 #include <wx/filename.h>
@@ -20,13 +21,6 @@ static const int THUMB_PADDING = 12;
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
-static wxBitmap MakePlaceholder(int size)
-{
-    wxImage img(size, size, true);
-    img.SetRGB(wxRect(0, 0, size, size), 180, 180, 180);
-    return wxBitmap(img);
-}
 
 static wxBitmap MakeDim(const wxBitmap& src)
 {
@@ -563,7 +557,6 @@ public:
         , m_hoverTimer(this)
     {
         m_thumb = new ThumbDisplay(this, thumbSize);
-        m_thumb->SetBitmap(MakePlaceholder(thumbSize));
 
         m_label = new wxStaticText(this, wxID_ANY,
             wxFileName(path).GetFullName(),
@@ -715,7 +708,6 @@ public:
         , m_hoverTimer(this)
     {
         m_thumb = new ThumbDisplay(this, thumbSize);
-        m_thumb->SetBitmap(MakePlaceholder(thumbSize));
 
         m_label = new wxStaticText(this, wxID_ANY,
             wxFileName(path).GetFullName(),
@@ -836,6 +828,7 @@ ThumbnailGrid::ThumbnailGrid(wxWindow* parent, const wxString& emptyHint)
                        wxDefaultPosition, wxDefaultSize, wxVSCROLL)
     , m_emptyHint(emptyHint)
 {
+    SetWindowStyleFlag(GetWindowStyleFlag() & ~wxTAB_TRAVERSAL);
     SetScrollRate(0, 20);
     Bind(wxEVT_SIZE, &ThumbnailGrid::OnSize, this);
     Rebuild();
@@ -916,6 +909,8 @@ void ThumbnailGrid::Rebuild()
         wxStaticText* lbl = new wxStaticText(this, wxID_ANY, m_emptyHint,
                                              wxDefaultPosition, wxDefaultSize,
                                              wxALIGN_CENTER);
+        lbl->SetFont(Theme::FontBody());
+        lbl->SetForegroundColour(Theme::TextHint);
         wxBoxSizer* s = new wxBoxSizer(wxVERTICAL);
         s->Add(lbl, 0, wxALIGN_CENTER | wxALL, 20);
         SetSizer(s);
@@ -950,7 +945,6 @@ void ThumbnailGrid::Rebuild()
         }
     } else {
         // Plain mode: image cells are inspectable; video cells use VideoThumb (hover-reveal button).
-        wxBitmap placeholder = MakePlaceholder(thumbSize);
         for (const wxString& path : m_paths) {
             if (MediaUtils::IsVideoFile(path)) {
                 VideoThumb* cell = new VideoThumb(this, thumbSize, path);
@@ -960,7 +954,6 @@ void ThumbnailGrid::Rebuild()
                 grid->Add(cell, 0, wxALIGN_TOP | wxALIGN_CENTER_HORIZONTAL | wxALL, 4);
             } else {
                 ThumbDisplay* thumb = new ThumbDisplay(this, thumbSize);
-                thumb->SetBitmap(placeholder);
                 m_thumbUpdaters.push_back([thumb](const wxBitmap& b) {
                     thumb->SetBitmap(b);
                 });
@@ -984,7 +977,7 @@ void ThumbnailGrid::Rebuild()
 
     SetSizer(grid);
     FitInside();
-    Thaw(); // placeholders visible NOW
+    Thaw();
 
     // ── Background loading ────────────────────────────────────────────────────
     m_cancelToken = std::make_shared<std::atomic<bool>>(false);
@@ -1015,21 +1008,19 @@ void ThumbnailGrid::Rebuild()
                 // On non-Windows or if shell extraction fails, img stays invalid
                 // and the gray placeholder remains.
             } else if (wxFileExists(paths[i])) {
-                // ── Image: load and scale with wxImage ───────────────────────
-                img.SetOption(wxIMAGE_OPTION_MAX_WIDTH,  tSize);
-                img.SetOption(wxIMAGE_OPTION_MAX_HEIGHT, tSize);
+                // ── Image: load scaled to cell width, proportional height ────
+                img.SetOption(wxIMAGE_OPTION_MAX_WIDTH, tSize);
                 img.LoadFile(paths[i], wxBITMAP_TYPE_ANY);
             }
 
             if (img.IsOk())
             {
-                double sx = (double)tSize / img.GetWidth();
-                double sy = (double)tSize / img.GetHeight();
-                double s  = std::min(sx, sy);
-                if (s < 1.0)
-                    img = img.Scale((int)(img.GetWidth()  * s),
-                                    (int)(img.GetHeight() * s),
-                                    wxIMAGE_QUALITY_NORMAL);
+                // Fit by width: scale so width == tSize, height proportional
+                double s = (double)tSize / img.GetWidth();
+                if (std::abs(s - 1.0) > 0.001)
+                    img = img.Scale(tSize,
+                                    std::max(1, (int)(img.GetHeight() * s + 0.5)),
+                                    wxIMAGE_QUALITY_HIGH);
             }
 
             if (token->load(std::memory_order_relaxed)) break;

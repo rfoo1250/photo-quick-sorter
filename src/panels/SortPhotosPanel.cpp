@@ -1,6 +1,7 @@
 #include "panels/SortPhotosPanel.h"
 #include "ui/PhotoQuickSorterFrame.h"
 #include "ui/ThumbnailGrid.h"
+#include "ui/Theme.h"
 #include "utils/logging.h"
 #include "utils/MediaUtils.h"
 #include <wx/filename.h>
@@ -260,7 +261,10 @@ SortPhotosPanel::SortPhotosPanel(wxWindow* parent)
 
 void SortPhotosPanel::BuildSortingUI()
 {
+    SetBackgroundColour(Theme::BgPanel);
+
     m_imageViewport = new wxPanel(this, wxID_ANY);
+    m_imageViewport->SetBackgroundColour(Theme::BgImageView);
     m_imageBitmap = new wxStaticBitmap(m_imageViewport, wxID_ANY, wxNullBitmap);
     m_imageBitmap->Bind(wxEVT_MOUSEWHEEL, &SortPhotosPanel::OnImageMouseWheel, this);
     m_imageBitmap->Bind(wxEVT_LEFT_DOWN, &SortPhotosPanel::OnImageLeftDown, this);
@@ -374,21 +378,17 @@ void SortPhotosPanel::BuildSortingUI()
     });
 
     m_fileMetaLabel = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_RIGHT);
-    m_fileMetaLabel->SetForegroundColour(wxColour(100, 100, 100));
+    m_fileMetaLabel->SetForegroundColour(Theme::TextSecondary);
 
     m_helpLabel = new wxStaticText(this, wxID_ANY,
         "Hold button/key >2s: ignored\n"
         "Click filename: copy full path\n"
         "Scroll on image: zoom\n"
         "Drag on image: pan");
-    {
-        wxFont f = m_helpLabel->GetFont();
-        f.SetPointSize(f.GetPointSize() - 1);
-        m_helpLabel->SetFont(f);
-    }
-    m_helpLabel->SetForegroundColour(wxColour(130, 130, 130));
+    m_helpLabel->SetFont(Theme::FontHint());
+    m_helpLabel->SetForegroundColour(Theme::TextHint);
 
-    wxFlexGridSizer* grid = new wxFlexGridSizer(5, 3, 0, 0);
+    wxFlexGridSizer* grid = new wxFlexGridSizer(5, 3, 4, 4);
     grid->AddGrowableRow(2);
     grid->AddGrowableCol(1);
 
@@ -1337,8 +1337,8 @@ void SortPhotosPanel::ShowReviewStep()
     if (icEsc.IsOk()) { skipBtn->SetBitmap(icEsc); skipBtn->SetBitmapPosition(wxLEFT); }
 
     if (m_currentReviewStep == ReviewStep::Delete) {
-        confirmBtn->SetBackgroundColour(wxColour(200, 60, 60));
-        confirmBtn->SetForegroundColour(*wxWHITE);
+        confirmBtn->SetBackgroundColour(Theme::Danger);
+        confirmBtn->SetForegroundColour(Theme::DangerText);
     }
 
     wxBoxSizer* btnRow = new wxBoxSizer(wxHORIZONTAL);
@@ -1663,8 +1663,8 @@ void SortPhotosPanel::UpdateGridToggleButton()
     }
 
     if (m_showRuleOfThirds) {
-        m_ruleOfThirdsBtn->SetBackgroundColour(wxColour(70, 120, 70));
-        m_ruleOfThirdsBtn->SetForegroundColour(*wxWHITE);
+        m_ruleOfThirdsBtn->SetBackgroundColour(Theme::Accent);
+        m_ruleOfThirdsBtn->SetForegroundColour(Theme::AccentText);
     } else {
         m_ruleOfThirdsBtn->SetBackgroundColour(wxNullColour);
         m_ruleOfThirdsBtn->SetForegroundColour(wxNullColour);
@@ -1702,10 +1702,7 @@ void SortPhotosPanel::ShowDoneState()
 
     wxStaticText* msg = new wxStaticText(this, wxID_ANY, "All Done!\nAll images were saved.",
                                           wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
-    wxFont f = msg->GetFont();
-    f.SetPointSize(f.GetPointSize() + 6);
-    f.SetWeight(wxFONTWEIGHT_BOLD);
-    msg->SetFont(f);
+    msg->SetFont(Theme::FontDone());
     vSizer->Add(msg, 0, wxALIGN_CENTER | wxALL, 20);
 
     vSizer->AddStretchSpacer();

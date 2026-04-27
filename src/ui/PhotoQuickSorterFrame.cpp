@@ -2,6 +2,7 @@
 #include "panels/MainMenuPanel.h"
 #include "panels/SortPhotosPanel.h"
 #include "utils/logging.h"
+#include "ui/Theme.h"
 #include <memory>
 
 #if DEBUG_MODE
@@ -23,6 +24,7 @@ PhotoQuickSorterFrame::PhotoQuickSorterFrame(const wxString &title)
     frameSizer->Add(m_sortPhotosPanel, 1, wxEXPAND);
 
     SetSizer(frameSizer);
+    SetBackgroundColour(Theme::BgPanel);
     Centre();
 
     // hide the sort panel at startup so only main menu shows

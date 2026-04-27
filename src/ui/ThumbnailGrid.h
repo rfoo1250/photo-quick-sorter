@@ -23,6 +23,8 @@ public:
                            const wxString& emptyHint = "No images.");
     ~ThumbnailGrid();
 
+    bool AcceptsFocusFromKeyboard() const override { return false; }
+
     // Replace displayed images. Empty vector shows the empty hint.
     void SetImages(const std::vector<wxString>& paths);
 

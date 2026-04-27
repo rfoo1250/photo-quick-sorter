@@ -1,4 +1,5 @@
 #include "ui/Toast.h"
+#include "ui/Theme.h"
 #include <wx/utils.h>
 
 static const int TOAST_MARGIN_BOTTOM = 24;
@@ -11,15 +12,12 @@ Toast::Toast(wxWindow* parent)
               wxDefaultPosition, wxDefaultSize,
               wxNO_BORDER | wxFRAME_NO_TASKBAR | wxSTAY_ON_TOP | wxFRAME_FLOAT_ON_PARENT)
 {
-    SetBackgroundColour(wxColour(45, 45, 45));
+    SetBackgroundColour(Theme::BgToast);
 
     m_label = new wxStaticText(this, wxID_ANY, wxEmptyString,
                                wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
-    m_label->SetForegroundColour(*wxWHITE);
-
-    wxFont f = m_label->GetFont();
-    f.SetPointSize(f.GetPointSize() + 1);
-    m_label->SetFont(f);
+    m_label->SetForegroundColour(Theme::TextOnDark);
+    m_label->SetFont(Theme::FontBody());
 
     wxBoxSizer* s = new wxBoxSizer(wxVERTICAL);
     s->Add(m_label, 1, wxALIGN_CENTER | wxALL, TOAST_PADDING);
