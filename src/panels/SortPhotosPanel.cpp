@@ -1551,11 +1551,12 @@ void SortPhotosPanel::OnImageMouseWheel(wxMouseEvent& evt)
         return;
     }
 
+    const wxPoint anchor = evt.GetPosition();
     const int rotation = evt.GetWheelRotation();
     if (rotation > 0)
-        ApplyZoomStep(1, &evt.GetPosition());
+        ApplyZoomStep(1, &anchor);
     else if (rotation < 0)
-        ApplyZoomStep(-1, &evt.GetPosition());
+        ApplyZoomStep(-1, &anchor);
     else
         evt.Skip();
 }
