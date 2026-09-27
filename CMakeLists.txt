@@ -6,10 +6,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---- wxWidgets setup ----
-# adjust these paths to your installation if different
-set(wxWidgets_ROOT_DIR "C:/Libraries/wxWidgets-3.3.1")
-set(wxWidgets_LIB_DIR "C:/Libraries/wxWidgets-3.3.1/lib/vc_x64_lib")
-set(wxWidgets_USE_STATIC ON)
+# Windows: point at a local static build — adjust these paths if yours differ.
+# Elsewhere: find_package locates wxWidgets through wx-config, no paths needed
+# (macOS: `brew install wxwidgets`).
+if (WIN32)
+    set(wxWidgets_ROOT_DIR "C:/Libraries/wxWidgets-3.3.1")
+    set(wxWidgets_LIB_DIR "C:/Libraries/wxWidgets-3.3.1/lib/vc_x64_lib")
+    set(wxWidgets_USE_STATIC ON)
+endif()
 
 # Prefer find_package to locate wxWidgets
 find_package(wxWidgets REQUIRED COMPONENTS core base media)
@@ -48,7 +52,7 @@ set(HEADERS
     src/panels/SortPhotosPanel.h
 )
 
-add_executable(PhotoQuickSorter WIN32 ${SOURCES} ${HEADERS})
+add_executable(PhotoQuickSorter WIN32 MACOSX_BUNDLE ${SOURCES} ${HEADERS})
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/src PREFIX "Source Files" FILES ${SOURCES} ${HEADERS})
 
@@ -71,7 +75,9 @@ endif()
 target_link_libraries(PhotoQuickSorter PRIVATE ${wxWidgets_LIBRARIES})
 
 # Link bundled wxWidgets third-party libs (not included by find_package automatically)
-# These are required by wxmsw33ud_core.lib for image format support
+# These are required by wxmsw33ud_core.lib for image format support.
+# MSVC static build only — other platforms get them via wx-config.
+if (WIN32)
 target_link_libraries(PhotoQuickSorter PRIVATE
     $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxwebpd.lib>
     $<$<CONFIG:Debug>:${wxWidgets_LIB_DIR}/wxjpegd.lib>
@@ -86,6 +92,7 @@ target_link_libraries(PhotoQuickSorter PRIVATE
     $<$<NOT:$<CONFIG:Debug>>:${wxWidgets_LIB_DIR}/wxzlib.lib>
     $<$<NOT:$<CONFIG:Debug>>:${wxWidgets_LIB_DIR}/wxexpat.lib>
 )
+endif()
 
 # Optional: include your src folder for your own headers
 target_include_directories(PhotoQuickSorter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
