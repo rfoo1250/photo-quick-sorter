@@ -38,6 +38,7 @@ set(SOURCES
 )
 set(HEADERS
     src/utils/config.h
+    src/utils/AssetPaths.h
     src/utils/MediaUtils.h
     src/utils/VideoConverter.h
     src/app/PhotoQuickSorterApp.h

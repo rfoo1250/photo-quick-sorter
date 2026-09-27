@@ -2,6 +2,7 @@
 #include "ui/PhotoQuickSorterFrame.h"
 #include "ui/ThumbnailGrid.h"
 #include "utils/logging.h"
+#include "utils/AssetPaths.h"
 #include "utils/MediaUtils.h"
 #include <wx/filename.h>
 #include <wx/filefn.h>
@@ -228,16 +229,8 @@ void SortPhotosPanel::TryQuitToMenu()
 
 wxBitmap SortPhotosPanel::LoadKeycap(const wxString& filename, int size) const
 {
-    wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
-    exe.Normalize(); exe.SetFullName("");
-    // Installed: assets/ next to the exe
-    wxString path = exe.GetFullPath() + "assets/single-keys-blank/200dpi/" + filename;
-    if (!wxFileExists(path)) {
-        // Dev: CMake puts exe in build/{Config}/, project root is 2 levels up
-        wxFileName dev = exe; dev.RemoveLastDir(); dev.RemoveLastDir();
-        path = dev.GetFullPath() + "assets/single-keys-blank/200dpi/" + filename;
-    }
-    if (!wxFileExists(path)) return wxNullBitmap;
+    const wxString path = AssetPaths::Find("single-keys-blank/200dpi/" + filename);
+    if (path.IsEmpty()) return wxNullBitmap;
     wxImage img(path, wxBITMAP_TYPE_PNG);
     if (!img.IsOk()) return wxNullBitmap;
     img = img.Scale(size, size, wxIMAGE_QUALITY_HIGH);
